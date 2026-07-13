@@ -1,0 +1,25 @@
+.form { padding: 15px;}
+.input { width: 70px; }
+.input-number {
+    margin-left: 15px;
+    width: 40px;
+}
+
+.btn { background:#FFAFF3;  padding:6px 10px; border-radius:4px; margin-left:25px }
+
+.list {
+  list-style-type: none;
+}
+
+.grocery-item { display:flex; align-items:center; gap:8px; margin:6px 0 }
+.crossed { text-decoration: line-through; color: #888 }
+
+.delete-btn {
+    margin-left: 10px;
+    background: #FFAFF3;
+    border-radius:40px
+}
+
+button:hover {
+    background: #d572c6
+}
