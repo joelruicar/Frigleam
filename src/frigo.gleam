@@ -61,6 +61,9 @@ fn view(model: Model) -> Element(Message) {
       html.button([attribute.type_("submit"), attribute.class("btn")], [
         element.text("Agregar"),
       ]),
+      html.button([attribute.class("btn"), event.on_click(UserDeletedList)], [
+        element.text("Delete all"),
+      ]),
     ]),
     html.ul([attribute.class("list")], items),
   ])
@@ -118,7 +121,7 @@ fn update(model: Model, message: Message) -> Model {
       Model(grocery_list: toggled)
     }
 
-    UserDeletedList -> Model([])
+    UserDeletedList -> Model(grocery_list: [])
   }
 }
 
