@@ -1,20 +1,29 @@
+import gleam/dynamic/decode
 import gleam/int
+import gleam/json
 import gleam/list
 import gleam/string
 import lustre
 import lustre/attribute
+import lustre/effect
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import varasto
 
 pub fn main() {
-  let app = lustre.simple(init, update, view)
+  let app = lustre.application(init, update, view)
   let assert Ok(_) = lustre.start(app, "#app", 0)
   Nil
 }
 
 type Model {
-  Model(grocery_list: List(#(String, Int, Bool)))
+  Model(items: varasto.TypedStorage(List(Item)))
+}
+
+type Item {
+  CheckedItem(name: String, amount: Int)
+  UncheckedItem(name: String, amount: Int)
 }
 
 type Message {
@@ -26,22 +35,25 @@ type Message {
 }
 
 fn view(model: Model) -> Element(Message) {
+  let assert Ok(items) = varasto.get(model.items, "items")
   let items =
-    list.map(model.grocery_list, fn(item) {
-      let #(name, count, done) = item
+    list.map(items, fn(item: Item) {
+      let done = is_checked(item)
       html.li([attribute.class("grocery-item")], [
         html.input([
           attribute.type_("checkbox"),
           attribute.checked(done),
-          event.on_click(UserToggledItem(name)),
+          event.on_click(UserToggledItem(item.name)),
         ]),
         html.span([attribute.classes([#("crossed", done)])], [
-          element.text(string.concat([int.to_string(count), " ", name])),
+          element.text(
+            string.concat([int.to_string(item.amount), " ", item.name]),
+          ),
         ]),
         html.button(
           [
             attribute.class("delete-btn"),
-            event.on_click(UserDeletedItem(name)),
+            event.on_click(UserDeletedItem(item.name)),
           ],
           [element.text("X")],
         ),
@@ -50,7 +62,11 @@ fn view(model: Model) -> Element(Message) {
 
   html.div([], [
     html.form([attribute.class("form"), event.on_submit(UserAddedItem)], [
-      html.input([attribute.name("input_form"), attribute.class("input")]),
+      html.input([
+        attribute.name("input_form"),
+        attribute.required(True),
+        attribute.class("input"),
+      ]),
       html.input([
         attribute.name("input_count"),
         attribute.type_("number"),
@@ -59,72 +75,160 @@ fn view(model: Model) -> Element(Message) {
         attribute.value("1"),
       ]),
       html.button([attribute.type_("submit"), attribute.class("btn")], [
-        element.text("Agregar"),
+        element.text("Add"),
       ]),
-      html.button([attribute.class("btn"), event.on_click(UserDeletedList)], [
-        element.text("Delete all"),
-      ]),
+      html.button(
+        [
+          attribute.type_("button"),
+          attribute.class("btn"),
+          event.on_click(UserDeletedList),
+        ],
+        [
+          element.text("Delete"),
+        ],
+      ),
     ]),
     html.ul([attribute.class("list")], items),
   ])
 }
 
-fn update(model: Model, message: Message) -> Model {
+fn is_checked(item: Item) -> Bool {
+  let done = case item {
+    CheckedItem(..) -> True
+    UncheckedItem(..) -> False
+  }
+  done
+}
+
+fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
   case message {
     UserAddedItem(form_item) -> {
       let assert Ok(name) = list.key_find(form_item, "input_form")
       let assert Ok(count_str) = list.key_find(form_item, "input_count")
       let assert Ok(count) = int.parse(count_str)
       let formatted_name = string.capitalise(name)
+      #(
+        model,
+        effect.from(fn(_) {
+          let assert Ok(items) = varasto.get(model.items, "items")
 
-      let item_exists =
-        list.any(model.grocery_list, fn(item) { item.0 == formatted_name })
+          let item_exists =
+            list.any(items, fn(item) { item.name == formatted_name })
 
-      let updated_list = case item_exists {
-        True ->
-          list.map(model.grocery_list, fn(item) {
-            case item.0 == formatted_name {
-              True -> #(item.0, item.1 + count, False)
-              False -> item
-            }
-          })
-        False -> [#(formatted_name, count, False), ..model.grocery_list]
-      }
+          let updated_list = case item_exists {
+            True ->
+              list.map(items, fn(item) {
+                case item.name == formatted_name {
+                  True -> UncheckedItem(item.name, item.amount + count)
+                  False -> item
+                }
+              })
+            False -> [UncheckedItem(formatted_name, count), ..items]
+          }
 
-      let sorted_list =
-        list.sort(updated_list, by: fn(a, b) { string.compare(a.0, b.0) })
-      Model(grocery_list: sorted_list)
+          let sorted_list =
+            list.sort(updated_list, by: fn(a, b) {
+              string.compare(a.name, b.name)
+            })
+          let _ = varasto.set(model.items, "items", sorted_list)
+          Nil
+        }),
+      )
     }
 
-    UserScannedList -> model
+    UserScannedList -> #(model, effect.none())
 
     UserDeletedItem(name) -> {
-      let filtered_list =
-        list.filter(model.grocery_list, fn(item) { item.0 != name })
-      Model(grocery_list: filtered_list)
+      #(
+        model,
+        effect.from(fn(_) {
+          let assert Ok(items) = varasto.get(model.items, "items")
+
+          let filtered_list =
+            list.filter(items, fn(item: Item) { item.name != name })
+          let _ = varasto.set(model.items, "items", filtered_list)
+          Nil
+        }),
+      )
+    }
+
+    UserDeletedList -> {
+      #(
+        model,
+        effect.from(fn(_) {
+          let _ = varasto.set(model.items, "items", [])
+          Nil
+        }),
+      )
     }
 
     UserToggledItem(name) -> {
-      let toggled =
-        list.map(model.grocery_list, fn(item) {
-          case item.0 == name {
-            True -> {
-              let new_done = case item.2 {
-                True -> False
-                False -> True
+      #(
+        model,
+        effect.from(fn(_) {
+          let assert Ok(items) = varasto.get(model.items, "items")
+          let toggled =
+            list.map(items, fn(item: Item) {
+              case item.name == name {
+                True -> {
+                  let _ = case item {
+                    CheckedItem(name:, amount:) -> UncheckedItem(name:, amount:)
+                    UncheckedItem(name:, amount:) -> CheckedItem(name:, amount:)
+                  }
+                }
+                False -> item
               }
-              #(item.0, item.1, new_done)
-            }
-            False -> item
+            })
+          let modified_list = {
+            let unchecked =
+              list.sort(
+                list.filter(toggled, fn(item) { !is_checked(item) }),
+                by: fn(a, b) { string.compare(a.name, b.name) },
+              )
+            let checked = list.filter(toggled, is_checked)
+            list.append(unchecked, checked)
           }
-        })
-      Model(grocery_list: toggled)
+          let _ = varasto.set(model.items, "items", modified_list)
+          Nil
+        }),
+      )
     }
-
-    UserDeletedList -> Model(grocery_list: [])
   }
 }
 
-fn init(_inicial: Int) -> Model {
-  Model([])
+fn init(_inicial: Int) -> #(Model, effect.Effect(Message)) {
+  let assert Ok(local) = varasto.local()
+
+  let s = varasto.new(local, reader(), writer)
+  let _ = case varasto.get(s, "items") {
+    Error(_) -> varasto.set(s, "items", [])
+    Ok(_) -> Ok(Nil)
+  }
+
+  #(Model(s), effect.none())
+}
+
+fn reader() {
+  let tuple_decoder = {
+    use name <- decode.field("name", decode.string)
+    use amount <- decode.field("number", decode.int)
+    use checked <- decode.field("checked", decode.bool)
+    decode.success(case checked {
+      True -> CheckedItem(name:, amount:)
+      False -> UncheckedItem(name:, amount:)
+    })
+  }
+  decode.list(tuple_decoder)
+}
+
+fn writer(lista_item: List(Item)) {
+  use item <- json.array(lista_item)
+  json.object([
+    case item {
+      CheckedItem(..) -> #("checked", json.bool(True))
+      UncheckedItem(..) -> #("checked", json.bool(False))
+    },
+    #("name", json.string(item.name)),
+    #("number", json.int(item.amount)),
+  ])
 }
