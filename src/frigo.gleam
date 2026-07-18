@@ -1,3 +1,4 @@
+import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
@@ -18,7 +19,7 @@ pub fn main() {
 }
 
 type Model {
-  Model(items: varasto.TypedStorage(List(Item)))
+  Model(items: varasto.TypedStorage(List(Item)), scanning: Bool)
 }
 
 type Item {
@@ -27,12 +28,24 @@ type Item {
 }
 
 type Message {
-  UserScannedList
+  UserSelectedImage(dynamic.Dynamic)
+  UserScannedText(String)
   UserAddedItem(List(#(String, String)))
   UserDeletedItem(String)
   UserToggledItem(String)
   UserDeletedList
 }
+
+// -- FFI: definidas en frigo_ffi.mjs, en la misma carpeta que este archivo --
+
+@external(javascript, "./frigo_ffi.mjs", "get_file_from_input")
+fn get_file_from_input(event: dynamic.Dynamic) -> dynamic.Dynamic
+
+@external(javascript, "./frigo_ffi.mjs", "is_null_file")
+fn is_null_file(file: dynamic.Dynamic) -> Bool
+
+@external(javascript, "./frigo_ffi.mjs", "scan_image")
+fn do_scan_image(file: dynamic.Dynamic, dispatch: fn(String) -> Nil) -> Nil
 
 fn view(model: Model) -> Element(Message) {
   let assert Ok(items) = varasto.get(model.items, "items")
@@ -88,6 +101,25 @@ fn view(model: Model) -> Element(Message) {
         ],
       ),
     ]),
+    html.div([attribute.class("scan-section")], [
+      html.label(
+        [attribute.class("btn"), attribute.attribute("for", "scan-input")],
+        [
+          element.text(case model.scanning {
+            True -> "Escaneando..."
+            False -> "📷 Escanear lista"
+          }),
+        ],
+      ),
+      html.input([
+        attribute.type_("file"),
+        attribute.id("scan-input"),
+        attribute.attribute("accept", "image/*"),
+        attribute.attribute("capture", "environment"),
+        attribute.attribute("style", "display:none"),
+        event.on("change", decode.map(decode.dynamic, UserSelectedImage)),
+      ]),
+    ]),
     html.ul([attribute.class("list")], items),
   ])
 }
@@ -136,7 +168,56 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
       )
     }
 
-    UserScannedList -> #(model, effect.none())
+    UserSelectedImage(event) -> {
+      let file = get_file_from_input(event)
+      case is_null_file(file) {
+        True -> #(model, effect.none())
+        False -> #(
+          Model(..model, scanning: True),
+          effect.from(fn(dispatch) {
+            do_scan_image(file, fn(text) { dispatch(UserScannedText(text)) })
+          }),
+        )
+      }
+    }
+
+    UserScannedText(text) -> {
+      #(
+        Model(..model, scanning: False),
+        effect.from(fn(_) {
+          let assert Ok(items) = varasto.get(model.items, "items")
+
+          let lines =
+            text
+            |> string.split("\n")
+            |> list.map(string.trim)
+            |> list.filter(fn(l) { l != "" })
+            |> list.map(string.capitalise)
+
+          let updated_list =
+            list.fold(lines, items, fn(acc, name) {
+              let item_exists = list.any(acc, fn(item) { item.name == name })
+              case item_exists {
+                True ->
+                  list.map(acc, fn(item) {
+                    case item.name == name {
+                      True -> UncheckedItem(item.name, item.amount + 1)
+                      False -> item
+                    }
+                  })
+                False -> [UncheckedItem(name, 1), ..acc]
+              }
+            })
+
+          let sorted_list =
+            list.sort(updated_list, by: fn(a, b) {
+              string.compare(a.name, b.name)
+            })
+          let _ = varasto.set(model.items, "items", sorted_list)
+          Nil
+        }),
+      )
+    }
 
     UserDeletedItem(name) -> {
       #(
@@ -205,7 +286,7 @@ fn init(_inicial: Int) -> #(Model, effect.Effect(Message)) {
     Ok(_) -> Ok(Nil)
   }
 
-  #(Model(s), effect.none())
+  #(Model(items: s, scanning: False), effect.none())
 }
 
 fn reader() {
