@@ -1,5 +1,51 @@
 import { DurableObject } from "cloudflare:workers";
 
+const MAX_OCR_BYTES = 5 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const ALLOWED_ORIGINS = new Set([
+  "https://frigo.frigleam.workers.dev",
+  "http://localhost:8787",
+]);
+
+function cors_headers(request) {
+  const origin = request.headers.get("Origin");
+  const headers = new Headers();
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Vary", "Origin");
+  }
+  return headers;
+}
+
+function json_response(request, body, status = 200, extra_headers = {}) {
+  const headers = cors_headers(request);
+  headers.set("Content-Type", "application/json");
+  for (const [key, value] of Object.entries(extra_headers)) headers.set(key, value);
+  return new Response(JSON.stringify(body), { status, headers });
+}
+
+function is_valid_image_bytes(bytes, type) {
+  if (!ALLOWED_IMAGE_TYPES.has(type)) return false;
+  if (type === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (type === "image/png") return bytes.slice(0, 8).every((value, index) => value === [137, 80, 78, 71, 13, 10, 26, 10][index]);
+  return String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+}
+
+async function verify_turnstile(request, token, env) {
+  if (!env.TURNSTILE_SECRET || !token) return false;
+  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      secret: env.TURNSTILE_SECRET,
+      response: token,
+      remoteip: request.headers.get("CF-Connecting-IP"),
+    }),
+  });
+  const result = await response.json();
+  return result.success === true;
+}
+
 /**
  * ShoppingListRoom
  * Durable Object that manages state and WebSocket connections for a single shopping list room.
@@ -233,13 +279,10 @@ export default {
     // OCR API endpoint: /api/ocr powered by Cloudflare Workers AI
     if (url.pathname === "/api/ocr") {
       if (request.method === "OPTIONS") {
-        return new Response(null, {
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-          },
-        });
+        const headers = cors_headers(request);
+        headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+        headers.set("Access-Control-Allow-Headers", "Content-Type");
+        return new Response(null, { headers });
       }
 
       if (request.method !== "POST") {
@@ -247,50 +290,60 @@ export default {
       }
 
       try {
+        if (!env.OCR_RATE_LIMITER || !env.TURNSTILE_SECRET) {
+          return json_response(request, { error: "OCR no está configurado de forma segura" }, 503);
+        }
+
+        const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+        const rate = await env.OCR_RATE_LIMITER.limit({ key: ip });
+        if (!rate.success) {
+          return json_response(request, { error: "Demasiadas peticiones OCR" }, 429, {
+            "Retry-After": "60",
+          });
+        }
+
+        const contentLength = Number(request.headers.get("content-length") || 0);
+        if (contentLength > MAX_OCR_BYTES) {
+          return json_response(request, { error: "La imagen supera el límite de 5 MB" }, 413);
+        }
+
         let imageBuffer;
         const contentType = request.headers.get("content-type") || "";
+        let imageType;
+        let turnstileToken;
 
         if (contentType.includes("multipart/form-data")) {
           const formData = await request.formData();
           const file = formData.get("file");
-          if (!file) {
-            return Response.json(
-              { error: "No se encontró el archivo de imagen" },
-              { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
-            );
+          if (!file || typeof file.arrayBuffer !== "function") {
+            return json_response(request, { error: "No se encontró el archivo de imagen" }, 400);
           }
+          imageType = file.type;
+          turnstileToken = formData.get("turnstile_token");
           imageBuffer = await file.arrayBuffer();
         } else {
-          imageBuffer = await request.arrayBuffer();
+          return json_response(request, { error: "Se esperaba multipart/form-data" }, 415);
         }
 
+        if (imageBuffer.byteLength === 0 || imageBuffer.byteLength > MAX_OCR_BYTES) {
+          return json_response(request, { error: "La imagen supera el límite de 5 MB" }, 413);
+        }
+        const bytes = new Uint8Array(imageBuffer.slice(0, 12));
+        if (!is_valid_image_bytes(bytes, imageType)) {
+          return json_response(request, { error: "Tipo de imagen no permitido" }, 415);
+        }
+        if (!(await verify_turnstile(request, turnstileToken, env))) {
+          return json_response(request, { error: "Verificación Turnstile inválida" }, 403);
+        }
         if (!env.AI) {
-          return Response.json(
-            { error: "Workers AI no está configurado en el Worker" },
-            { status: 500, headers: { "Access-Control-Allow-Origin": "*" } }
-          );
+          return json_response(request, { error: "Workers AI no está configurado" }, 500);
         }
 
         const text = await runVisionOcr(env, imageBuffer);
-        return Response.json(
-          { text },
-          {
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-            },
-          }
-        );
+        return json_response(request, { text });
       } catch (err) {
         console.error("Error en /api/ocr:", err);
-        return Response.json(
-          { error: err.message || "Error procesando OCR" },
-          {
-            status: 500,
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-            },
-          }
-        );
+        return json_response(request, { error: err.message || "Error procesando OCR" }, 500);
       }
     }
 

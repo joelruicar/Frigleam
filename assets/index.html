@@ -16,9 +16,14 @@
   <link rel="apple-touch-icon" href="/icon.svg">
   
   <link href="/styles.css" rel="stylesheet">
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer></script>
   <script src="/frigo.js" type="module"></script>
 </head>
 <body>
   <div id="app"></div>
+  <div id="turnstile-widget" aria-hidden="true"></div>
+  <script>
+    window.FRIGO_TURNSTILE_SITE_KEY = "";
+  </script>
 </body>
 </html>

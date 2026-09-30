@@ -117,6 +117,13 @@ body {
   text-overflow: ellipsis;
 }
 
+.connection-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .room-edit-icon {
   font-size: 11px;
   color: var(--muted);
@@ -181,6 +188,30 @@ body {
   width: 62px;
   text-align: center;
   padding: 0 4px;
+}
+
+.category-select,
+.edit-category-select {
+  height: 44px;
+  min-width: 0;
+  border: 2px solid var(--frame);
+  border-radius: 10px;
+  padding: 0 28px 0 10px;
+  color: var(--frame);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.category-select {
+  flex: 1 1 150px;
+}
+
+.category-select:focus,
+.edit-category-select:focus {
+  outline: none;
+  border-color: var(--accent-dark);
+  box-shadow: 0 0 0 3px rgba(255, 175, 243, 0.4);
 }
 
 .input:focus,
@@ -422,6 +453,10 @@ body {
   color: var(--ink);
   background: #fff;
   padding: 0 8px;
+}
+
+.edit-category-select {
+  width: 100%;
 }
 
 .edit-name {
