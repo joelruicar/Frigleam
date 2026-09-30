@@ -1,81 +1,38 @@
+import categories
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
 import gleam/list
-import gleam/option.{type Option, None, Some}
-import gleam/order
+import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
+import items.{
+  type Item, Item, merge_item, parse_scanned_line, reader, sort_items, writer,
+}
 import lustre
-import lustre/attribute
 import lustre/effect
-import lustre/element.{type Element}
-import lustre/element/html
-import lustre/event
+import model.{
+  type Message, type Model, Connected, Connecting, ConnectionStatusChanged,
+  Disconnected, Model, Noop, RemoteItemsReceived, UserAddedItem,
+  UserAskedToDeleteList, UserCancelledDeleteList, UserChangedDraftAmount,
+  UserChangedDraftCategory, UserChangedDraftName, UserChangedSwitchInput,
+  UserClickedCopyLink, UserClickedItem, UserClickedNativeShare,
+  UserClosedShareModal, UserClosedSwitchModal, UserConfirmedDeleteList,
+  UserConfirmedEdit, UserConfirmedSwitchRoom, UserDeletedItem,
+  UserGenerateRandomRoom, UserOpenedShareModal, UserOpenedSwitchModal,
+  UserScannedText, UserSelectedImage, UserToggledItem, UserToggledSection,
+}
 import varasto
+import view as app_view
 
 pub fn main() {
-  let app = lustre.application(init, update, view)
+  let app =
+    lustre.application(init, update, fn(model) {
+      app_view.view(model, get_share_link(model.room_id))
+    })
   let assert Ok(_) = lustre.start(app, "#app", 0)
   Nil
-}
-
-pub type Item {
-  Item(name: String, amount: Int, checked: Bool)
-}
-
-pub type Model {
-  Model(
-    items_storage: varasto.TypedStorage(List(Item)),
-    items: List(Item),
-    scanning: Bool,
-    editing: Option(String),
-    confirm_delete_list: Bool,
-    draft_name: String,
-    draft_amount: String,
-    room_id: String,
-    connected: Bool,
-    show_share_modal: Bool,
-    show_switch_modal: Bool,
-    switch_room_input: String,
-    copied_toast: Bool,
-  )
-}
-
-pub type Message {
-  Noop
-
-  // Items & Editing
-  UserAddedItem(List(#(String, String)))
-  UserDeletedItem(String)
-  UserToggledItem(String)
-  UserAskedToDeleteList
-  UserCancelledDeleteList
-  UserConfirmedDeleteList
-  UserClickedItem(name: String, amount: Int)
-  UserChangedDraftName(String)
-  UserChangedDraftAmount(String)
-  UserConfirmedEdit
-
-  // OCR
-  UserSelectedImage(dynamic.Dynamic)
-  UserScannedText(String)
-
-  // Real-time synchronization
-  RemoteItemsReceived(dynamic.Dynamic)
-  ConnectionStatusChanged(Bool)
-
-  // Sharing & Room switching
-  UserOpenedShareModal
-  UserClosedShareModal
-  UserClickedNativeShare
-  UserClickedCopyLink
-  UserOpenedSwitchModal
-  UserClosedSwitchModal
-  UserChangedSwitchInput(String)
-  UserConfirmedSwitchRoom
-  UserGenerateRandomRoom
 }
 
 // =============================================================================
@@ -114,7 +71,7 @@ fn do_start_sync(
 fn broadcast_items_json(json_string: String) -> Nil
 
 @external(javascript, "./frigo_ffi.mjs", "share_room_link")
-fn share_room_link(room_id: String) -> Nil
+fn share_room_link(room_id: String) -> Bool
 
 @external(javascript, "./frigo_ffi.mjs", "copy_to_clipboard")
 fn copy_to_clipboard(text: String) -> Nil
@@ -129,52 +86,8 @@ fn render_qr_code(element_id: String, text: String) -> Nil
 fn enable_swipe_to_delete(on_swipe: fn(String) -> Nil) -> Nil
 
 // =============================================================================
-// Helper Functions
+// Application helpers
 // =============================================================================
-
-/// Unchecked first, then alphabetical.
-pub fn sort_items(items: List(Item)) -> List(Item) {
-  list.sort(items, by: fn(a, b) {
-    case a.checked, b.checked {
-      False, True -> order.Lt
-      True, False -> order.Gt
-      _, _ -> string.compare(a.name, b.name)
-    }
-  })
-}
-
-/// Adds `amount` to an existing item (unchecking it) or prepends a new one.
-pub fn merge_item(items: List(Item), name: String, amount: Int) -> List(Item) {
-  case list.any(items, fn(item) { item.name == name }) {
-    True ->
-      list.map(items, fn(item) {
-        case item.name == name {
-          True -> Item(..item, amount: item.amount + amount, checked: False)
-          False -> item
-        }
-      })
-    False -> [Item(name, amount, False), ..items]
-  }
-}
-
-pub fn parse_scanned_line(line: String) -> #(String, Int) {
-  let words =
-    line
-    |> string.split(" ")
-    |> list.filter(fn(w) { w != "" })
-
-  let amount =
-    words
-    |> list.find_map(int.parse)
-    |> result.unwrap(1)
-
-  let name_words = list.filter(words, fn(w) { result.is_error(int.parse(w)) })
-
-  case name_words {
-    [] -> #("", amount)
-    _ -> #(string.capitalise(string.join(name_words, " ")), amount)
-  }
-}
 
 fn load_room_items(
   storage: varasto.TypedStorage(List(Item)),
@@ -236,9 +149,20 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
         |> result.unwrap(1)
         |> int.max(1)
 
+      let selected_category =
+        list.key_find(form_item, "input_category")
+        |> result.unwrap("")
+
+      let category = case selected_category {
+        "" -> categories.infer_category(name)
+        value -> value
+      }
+
       case name {
         "" -> #(model, effect.none())
-        _ -> save(model, merge_item(model.items, name, count))
+        _ -> {
+          save(model, merge_item(model.items, name, count, category))
+        }
       }
     }
 
@@ -273,12 +197,13 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
     }
 
     // --- Inline editing ------------------------------------------------------
-    UserClickedItem(name, amount) -> #(
+    UserClickedItem(name, amount, category) -> #(
       Model(
         ..model,
         editing: Some(name),
         draft_name: name,
         draft_amount: int.to_string(amount),
+        draft_category: category,
       ),
       effect.none(),
     )
@@ -290,6 +215,11 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
 
     UserChangedDraftAmount(value) -> #(
       Model(..model, draft_amount: value),
+      effect.none(),
+    )
+
+    UserChangedDraftCategory(value) -> #(
+      Model(..model, draft_category: value),
       effect.none(),
     )
 
@@ -314,11 +244,21 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
                 list.find(others, fn(item) { item.name == new_name })
               {
                 Ok(existing) -> [
-                  Item(new_name, existing.amount + new_amount, False),
+                  Item(
+                    new_name,
+                    existing.amount + new_amount,
+                    False,
+                    model.draft_category,
+                  ),
                   ..list.filter(others, fn(item) { item.name != new_name })
                 ]
                 Error(_) -> [
-                  Item(..original_item, name: new_name, amount: new_amount),
+                  Item(
+                    name: new_name,
+                    amount: new_amount,
+                    checked: original_item.checked,
+                    category: model.draft_category,
+                  ),
                   ..others
                 ]
               }
@@ -329,6 +269,16 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
           }
         }
       }
+
+    // --- Sections ------------------------------------------------------------
+    UserToggledSection(cat) -> {
+      let is_collapsed = list.contains(model.collapsed_sections, cat)
+      let new_collapsed = case is_collapsed {
+        True -> list.filter(model.collapsed_sections, fn(c) { c != cat })
+        False -> [cat, ..model.collapsed_sections]
+      }
+      #(Model(..model, collapsed_sections: new_collapsed), effect.none())
+    }
 
     // --- OCR -----------------------------------------------------------------
     UserSelectedImage(event) -> {
@@ -353,7 +303,8 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
         |> list.map(parse_scanned_line)
         |> list.filter(fn(pair) { pair.0 != "" })
         |> list.fold(model.items, fn(acc, pair) {
-          merge_item(acc, pair.0, pair.1)
+          let category = categories.infer_category(pair.0)
+          merge_item(acc, pair.0, pair.1, category)
         })
 
       let #(m, eff) = save(model, updated)
@@ -382,7 +333,10 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
       }
 
     ConnectionStatusChanged(is_connected) -> #(
-      Model(..model, connected: is_connected),
+      Model(..model, connection_status: case is_connected {
+        True -> Connected
+        False -> Disconnected
+      }),
       effect.none(),
     )
 
@@ -402,7 +356,10 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
 
     UserClickedNativeShare -> #(
       model,
-      effect.from(fn(_) { share_room_link(model.room_id) }),
+      effect.from(fn(_) {
+        let _ = share_room_link(model.room_id)
+        Nil
+      }),
     )
 
     UserClickedCopyLink -> #(
@@ -440,7 +397,7 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
             room_id: room,
             items: load_room_items(model.items_storage, room),
             show_switch_modal: False,
-            connected: False,
+            connection_status: Connecting,
           ),
           effect.batch([
             effect.from(fn(_) { set_active_room_id(room) }),
@@ -449,313 +406,6 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
         )
       }
   }
-}
-
-// =============================================================================
-// View
-// =============================================================================
-
-fn modal(
-  on_close: Message,
-  title: String,
-  children: List(Element(Message)),
-) -> Element(Message) {
-  html.div([attribute.class("modal-backdrop"), event.on_click(on_close)], [
-    html.div(
-      [
-        attribute.class("modal"),
-        // Swallow clicks so they don't bubble up to the backdrop.
-        event.stop_propagation(event.on_click(Noop)),
-      ],
-      [
-        html.h3([attribute.class("modal-title")], [element.text(title)]),
-        ..children
-      ],
-    ),
-  ])
-}
-
-fn text_button(
-  class: String,
-  on_click: Message,
-  label: String,
-) -> Element(Message) {
-  html.button([attribute.class(class), event.on_click(on_click)], [
-    element.text(label),
-  ])
-}
-
-fn view_item(model: Model, item: Item) -> Element(Message) {
-  let checkbox =
-    html.input([
-      attribute.type_("checkbox"),
-      attribute.checked(item.checked),
-      event.on_click(UserToggledItem(item.name)),
-    ])
-
-  case model.editing {
-    Some(name) if name == item.name ->
-      html.li([attribute.class("grocery-item editing")], [
-        checkbox,
-        html.input([
-          attribute.class("edit-name"),
-          attribute.value(model.draft_name),
-          event.on_input(UserChangedDraftName),
-        ]),
-        html.input([
-          attribute.class("edit-amount"),
-          attribute.type_("number"),
-          attribute.min("1"),
-          attribute.value(model.draft_amount),
-          event.on_input(UserChangedDraftAmount),
-        ]),
-        html.button(
-          [
-            attribute.class("confirm-btn"),
-            event.on_click(UserConfirmedEdit),
-            attribute.attribute("aria-label", "Guardar cambios"),
-          ],
-          [element.text("✓")],
-        ),
-      ])
-
-    _ -> {
-      let edit = event.on_click(UserClickedItem(item.name, item.amount))
-      html.li(
-        [
-          attribute.class("grocery-item"),
-          attribute.attribute("data-swipe-item", item.name),
-        ],
-        [
-          checkbox,
-          html.span(
-            [
-              attribute.classes([
-                #("item-name", True),
-                #("crossed", item.checked),
-              ]),
-              edit,
-            ],
-            [element.text(item.name)],
-          ),
-          html.span(
-            [
-              attribute.classes([
-                #("item-amount", True),
-                #("crossed", item.checked),
-              ]),
-              edit,
-            ],
-            [element.text(int.to_string(item.amount))],
-          ),
-          html.button(
-            [
-              attribute.class("delete-btn"),
-              event.on_click(UserDeletedItem(item.name)),
-              attribute.attribute("aria-label", "Borrar item"),
-            ],
-            [element.text("×")],
-          ),
-        ],
-      )
-    }
-  }
-}
-
-fn view_share_modal(model: Model) -> Element(Message) {
-  case model.show_share_modal {
-    False -> element.none()
-    True ->
-      modal(UserClosedShareModal, "Compartir lista", [
-        html.p([attribute.class("modal-desc")], [
-          element.text(
-            "Cualquiera con este enlace o código podrá ver y editar la lista en tiempo real:",
-          ),
-        ]),
-        html.div([attribute.class("qr-wrapper")], [
-          html.div([attribute.id("share-qr-code")], []),
-          html.span([attribute.class("qr-hint")], [
-            element.text("Escanea con la cámara de otro móvil"),
-          ]),
-        ]),
-        html.div([attribute.class("share-input-row")], [
-          html.input([
-            attribute.class("input share-url-input"),
-            attribute.value(get_share_link(model.room_id)),
-            attribute.readonly(True),
-          ]),
-          text_button(
-            "btn copy-btn",
-            UserClickedCopyLink,
-            case model.copied_toast {
-              True -> "¡Copiado!"
-              False -> "Copiar"
-            },
-          ),
-        ]),
-        html.div([attribute.class("modal-actions")], [
-          text_button(
-            "btn btn-primary full-width",
-            UserClickedNativeShare,
-            "📲 Enviar por WhatsApp / Compartir",
-          ),
-          text_button(
-            "btn btn-secondary full-width",
-            UserClosedShareModal,
-            "Cerrar",
-          ),
-        ]),
-      ])
-  }
-}
-
-fn view_switch_modal(model: Model) -> Element(Message) {
-  case model.show_switch_modal {
-    False -> element.none()
-    True ->
-      modal(UserClosedSwitchModal, "Cambiar de lista", [
-        html.p([attribute.class("modal-desc")], [
-          element.text(
-            "Introduce el nombre o código de la lista a la que quieres unirte:",
-          ),
-        ]),
-        html.div([attribute.class("share-input-row")], [
-          html.input([
-            attribute.class("input"),
-            attribute.placeholder("Ej: casa, finde, compra-familia"),
-            attribute.value(model.switch_room_input),
-            event.on_input(UserChangedSwitchInput),
-          ]),
-        ]),
-        html.div([attribute.class("modal-actions")], [
-          text_button(
-            "btn btn-primary full-width",
-            UserConfirmedSwitchRoom,
-            "Unirme a esta lista",
-          ),
-          text_button(
-            "btn btn-secondary full-width",
-            UserGenerateRandomRoom,
-            "🎲 Generar código aleatorio",
-          ),
-          text_button(
-            "btn btn-secondary full-width",
-            UserClosedSwitchModal,
-            "Cancelar",
-          ),
-        ]),
-      ])
-  }
-}
-
-fn view_delete_modal(model: Model) -> Element(Message) {
-  case model.confirm_delete_list {
-    False -> element.none()
-    True ->
-      modal(UserCancelledDeleteList, "¿Vaciar toda la lista?", [
-        html.div([attribute.class("modal-actions")], [
-          text_button("btn btn-secondary", UserCancelledDeleteList, "Cancelar"),
-          text_button("btn btn-danger", UserConfirmedDeleteList, "Vaciar"),
-        ]),
-      ])
-  }
-}
-
-fn view(model: Model) -> Element(Message) {
-  html.div([attribute.class("frigo-container")], [
-    // Top bar
-    html.header([attribute.class("app-header")], [
-      html.button(
-        [
-          attribute.class("room-badge"),
-          event.on_click(UserOpenedSwitchModal),
-          attribute.title("Cambiar de lista"),
-        ],
-        [
-          html.span(
-            [
-              attribute.classes([
-                #("status-dot", True),
-                #("online", model.connected),
-                #("offline", !model.connected),
-              ]),
-            ],
-            [],
-          ),
-          html.span([attribute.class("room-name")], [
-            element.text(model.room_id),
-          ]),
-          html.span([attribute.class("room-edit-icon")], [element.text("▾")]),
-        ],
-      ),
-      html.button(
-        [
-          attribute.class("share-btn"),
-          event.on_click(UserOpenedShareModal),
-          attribute.title("Compartir esta lista"),
-        ],
-        [element.text("👥 Compartir")],
-      ),
-    ]),
-    // Add item form
-    html.form([attribute.class("form"), event.on_submit(UserAddedItem)], [
-      html.input([
-        attribute.name("input_form"),
-        attribute.placeholder("Producto (ej: Leche)..."),
-        attribute.required(True),
-        attribute.class("input"),
-      ]),
-      html.input([
-        attribute.name("input_count"),
-        attribute.type_("number"),
-        attribute.class("input-number"),
-        attribute.min("1"),
-        attribute.value("1"),
-      ]),
-      html.button([attribute.type_("submit"), attribute.class("btn")], [
-        element.text("Añadir"),
-      ]),
-      html.button(
-        [
-          attribute.type_("button"),
-          attribute.class("btn btn-danger"),
-          event.on_click(UserAskedToDeleteList),
-          attribute.title("Vaciar toda la lista"),
-        ],
-        [element.text("Vaciar")],
-      ),
-    ]),
-    // OCR
-    html.div([attribute.class("scan-section")], [
-      html.label(
-        [
-          attribute.class("btn btn-scan"),
-          attribute.attribute("for", "scan-input"),
-        ],
-        [
-          element.text(case model.scanning {
-            True -> "📷 Escaneando imagen..."
-            False -> "📷 Escanear lista en papel"
-          }),
-        ],
-      ),
-      html.input([
-        attribute.type_("file"),
-        attribute.id("scan-input"),
-        attribute.attribute("accept", "image/*"),
-        attribute.attribute("capture", "environment"),
-        attribute.attribute("hidden", ""),
-        event.on("change", decode.map(decode.dynamic, UserSelectedImage)),
-      ]),
-    ]),
-    html.ul(
-      [attribute.class("list")],
-      list.map(model.items, fn(item) { view_item(model, item) }),
-    ),
-    view_share_modal(model),
-    view_switch_modal(model),
-    view_delete_modal(model),
-  ])
 }
 
 // =============================================================================
@@ -776,8 +426,10 @@ fn init(_initial: Int) -> #(Model, effect.Effect(Message)) {
       confirm_delete_list: False,
       draft_name: "",
       draft_amount: "",
+      draft_category: "📦 Otros",
+      collapsed_sections: [],
       room_id: room,
-      connected: False,
+      connection_status: Connecting,
       show_share_modal: False,
       show_switch_modal: False,
       switch_room_input: "",
@@ -790,26 +442,4 @@ fn init(_initial: Int) -> #(Model, effect.Effect(Message)) {
       start_sync_effect(room),
     ]),
   )
-}
-
-// =============================================================================
-// Decoders & Encoders
-// =============================================================================
-
-pub fn reader() {
-  decode.list({
-    use name <- decode.field("name", decode.string)
-    use amount <- decode.field("number", decode.int)
-    use checked <- decode.field("checked", decode.bool)
-    decode.success(Item(name:, amount:, checked:))
-  })
-}
-
-pub fn writer(items: List(Item)) {
-  use item <- json.array(items)
-  json.object([
-    #("checked", json.bool(item.checked)),
-    #("name", json.string(item.name)),
-    #("number", json.int(item.amount)),
-  ])
 }

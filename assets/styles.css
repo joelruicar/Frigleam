@@ -117,6 +117,13 @@ body {
   text-overflow: ellipsis;
 }
 
+.connection-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .room-edit-icon {
   font-size: 11px;
   color: var(--muted);
@@ -181,6 +188,30 @@ body {
   width: 62px;
   text-align: center;
   padding: 0 4px;
+}
+
+.category-select,
+.edit-category-select {
+  height: 44px;
+  min-width: 0;
+  border: 2px solid var(--frame);
+  border-radius: 10px;
+  padding: 0 28px 0 10px;
+  color: var(--frame);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.category-select {
+  flex: 1 1 150px;
+}
+
+.category-select:focus,
+.edit-category-select:focus {
+  outline: none;
+  border-color: var(--accent-dark);
+  box-shadow: 0 0 0 3px rgba(255, 175, 243, 0.4);
 }
 
 .input:focus,
@@ -424,6 +455,10 @@ body {
   padding: 0 8px;
 }
 
+.edit-category-select {
+  width: 100%;
+}
+
 .edit-name {
   flex: 1;
   min-width: 0;
@@ -472,6 +507,132 @@ body {
 .delete-btn:hover {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+/* ==========================================================================
+   Category Sections & Accordions
+   ========================================================================== */
+
+.categories-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.category-section {
+  background: #fff;
+  border: 2px solid rgba(41, 45, 62, 0.16);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.15s ease;
+}
+
+.category-section:focus-within {
+  border-color: rgba(41, 45, 62, 0.35);
+}
+
+.category-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(41, 45, 62, 0.05);
+  cursor: pointer;
+  user-select: none;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--frame);
+  transition: background 0.15s ease;
+}
+
+.category-header:hover {
+  background: rgba(41, 45, 62, 0.09);
+}
+
+.category-header:active {
+  background: rgba(41, 45, 62, 0.14);
+}
+
+.category-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.category-arrow {
+  display: inline-block;
+  font-size: 9px;
+  color: var(--muted);
+  transition: transform 0.18s ease;
+}
+
+.category-arrow.collapsed {
+  transform: rotate(-90deg);
+}
+
+.category-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: rgba(41, 45, 62, 0.08);
+  color: var(--frame);
+  letter-spacing: -0.01em;
+}
+
+.category-badge.all-done {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.category-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(250, 247, 240, 0.35);
+}
+
+.empty-list-hint {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+/* Edit in place with category selection */
+.edit-fields-column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.edit-name-amount-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.edit-category-select {
+  height: 32px;
+  border: 1.5px solid var(--frame);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #fff;
+  color: var(--frame);
+  padding: 0 8px;
+  cursor: pointer;
+  outline: none;
+}
+
+.edit-category-select:focus {
+  border-color: var(--accent-dark);
 }
 
 /* ==========================================================================
