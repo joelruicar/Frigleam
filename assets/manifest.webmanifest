@@ -1,0 +1,18 @@
+{
+  "name": "Frigo - Lista de la compra",
+  "short_name": "Frigo",
+  "description": "Lista de la compra colaborativa en tiempo real y con escaneo OCR",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#2b2d31",
+  "theme_color": "#292D3E",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
