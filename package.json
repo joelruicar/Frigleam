@@ -1,0 +1,20 @@
+{
+  "name": "frigo",
+  "version": "1.0.0",
+  "description": "Lista de la compra compartida en tiempo real con Gleam y Lustre",
+  "scripts": {
+    "build:gleam": "gleam build --target javascript",
+    "bundle": "esbuild entry.js --bundle --minify --format=esm --outfile=dist/frigo.js",
+    "copy:assets": "cp -r assets/* dist/",
+    "build": "npm run build:gleam && npm run bundle && npm run copy:assets",
+    "dev": "npx wrangler dev",
+    "deploy": "npm run build && npx wrangler deploy"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "wrangler": "^4.145.0"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  }
+}
