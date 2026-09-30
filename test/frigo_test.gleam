@@ -27,20 +27,20 @@ pub fn parse_scanned_line_without_number_defaults_to_one_test() {
 
 pub fn sort_items_puts_unchecked_first_and_alphabetical_test() {
   let item_list = [
-    Item("Pan", 1, True, "🥖 Panadería"),
-    Item("Tomates", 3, False, "🥬 Frutas y verduras"),
-    Item("Aguacates", 2, False, "🥬 Frutas y verduras"),
-    Item("Aceite", 1, True, "🥫 Despensa"),
+    Item("1", "Pan", 1, True, "🥖 Panadería"),
+    Item("2", "Tomates", 3, False, "🥬 Frutas y verduras"),
+    Item("3", "Aguacates", 2, False, "🥬 Frutas y verduras"),
+    Item("4", "Aceite", 1, True, "🥫 Despensa"),
   ]
 
   let sorted = sort_items(item_list)
 
   sorted
   |> should.equal([
-    Item("Aguacates", 2, False, "🥬 Frutas y verduras"),
-    Item("Tomates", 3, False, "🥬 Frutas y verduras"),
-    Item("Aceite", 1, True, "🥫 Despensa"),
-    Item("Pan", 1, True, "🥖 Panadería"),
+    Item("3", "Aguacates", 2, False, "🥬 Frutas y verduras"),
+    Item("2", "Tomates", 3, False, "🥬 Frutas y verduras"),
+    Item("4", "Aceite", 1, True, "🥫 Despensa"),
+    Item("1", "Pan", 1, True, "🥖 Panadería"),
   ])
 }
 
@@ -69,9 +69,9 @@ pub fn infer_category_test() {
 }
 
 pub fn merge_item_accumulates_amount_test() {
-  let initial = [Item("Manzanas", 2, True, "🥬 Frutas y verduras")]
+  let initial = [Item("1", "Manzanas", 2, True, "🥬 Frutas y verduras")]
   let updated = merge_item(initial, "Manzanas", 3, "🥬 Frutas y verduras")
 
   updated
-  |> should.equal([Item("Manzanas", 5, False, "🥬 Frutas y verduras")])
+  |> should.equal([Item("1", "Manzanas", 5, False, "🥬 Frutas y verduras")])
 }

@@ -23,7 +23,10 @@
   <div id="app"></div>
   <div id="turnstile-widget" aria-hidden="true"></div>
   <script>
-    window.FRIGO_TURNSTILE_SITE_KEY = "";
+    window.FRIGO_TURNSTILE_SITE_KEY = "0x4AAAAAAFKoSGpsxQFoYxRl";
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js"));
+    }
   </script>
 </body>
 </html>

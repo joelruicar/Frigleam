@@ -2,7 +2,7 @@ import categories
 import gleam/dynamic/decode
 import gleam/int
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import items.{type Item}
 import lustre/attribute
 import lustre/element.{type Element}
@@ -53,11 +53,11 @@ fn view_item(model: Model, item: Item) -> Element(Message) {
     html.input([
       attribute.type_("checkbox"),
       attribute.checked(item.checked),
-      event.on_click(UserToggledItem(item.name)),
+      event.on_click(UserToggledItem(item.id)),
     ])
 
   case model.editing {
-    Some(name) if name == item.name ->
+    Some(id) if id == item.id ->
       html.li([attribute.class("grocery-item editing")], [
         checkbox,
         html.div([attribute.class("edit-fields-column")], [
@@ -103,11 +103,16 @@ fn view_item(model: Model, item: Item) -> Element(Message) {
 
     _ -> {
       let edit =
-        event.on_click(UserClickedItem(item.name, item.amount, item.category))
+        event.on_click(UserClickedItem(
+          item.id,
+          item.name,
+          item.amount,
+          item.category,
+        ))
       html.li(
         [
           attribute.class("grocery-item"),
-          attribute.attribute("data-swipe-item", item.name),
+          attribute.attribute("data-swipe-item", item.id),
         ],
         [
           checkbox,
@@ -134,7 +139,7 @@ fn view_item(model: Model, item: Item) -> Element(Message) {
           html.button(
             [
               attribute.class("delete-btn"),
-              event.on_click(UserDeletedItem(item.name)),
+              event.on_click(UserDeletedItem(item.id)),
               attribute.attribute("aria-label", "Borrar item"),
             ],
             [element.text("×")],
@@ -432,6 +437,16 @@ pub fn view(model: Model, share_url: String) -> Element(Message) {
         event.on("change", decode.map(decode.dynamic, UserSelectedImage)),
       ]),
     ]),
+    case model.ocr_error {
+      None -> element.none()
+      Some(error) ->
+        html.div(
+          [attribute.class("ocr-error"), attribute.attribute("role", "alert")],
+          [
+            html.span([], [element.text("No se pudo escanear: " <> error)]),
+          ],
+        )
+    },
     case model.items {
       [] ->
         html.div([attribute.class("empty-list-hint")], [

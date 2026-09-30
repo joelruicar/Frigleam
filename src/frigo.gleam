@@ -21,7 +21,8 @@ import model.{
   UserClosedShareModal, UserClosedSwitchModal, UserConfirmedDeleteList,
   UserConfirmedEdit, UserConfirmedSwitchRoom, UserDeletedItem,
   UserGenerateRandomRoom, UserOpenedShareModal, UserOpenedSwitchModal,
-  UserScannedText, UserSelectedImage, UserToggledItem, UserToggledSection,
+  UserScanFailed, UserScannedText, UserSelectedImage, UserToggledItem,
+  UserToggledSection,
 }
 import varasto
 import view as app_view
@@ -46,13 +47,20 @@ fn get_file_from_input(event: dynamic.Dynamic) -> dynamic.Dynamic
 fn is_null_file(file: dynamic.Dynamic) -> Bool
 
 @external(javascript, "./frigo_ffi.mjs", "scan_image")
-fn do_scan_image(file: dynamic.Dynamic, dispatch: fn(String) -> Nil) -> Nil
+fn do_scan_image(
+  file: dynamic.Dynamic,
+  on_success: fn(String) -> Nil,
+  on_error: fn(String) -> Nil,
+) -> Nil
 
 @external(javascript, "./frigo_ffi.mjs", "get_active_room_id")
 fn get_active_room_id() -> String
 
+@external(javascript, "./frigo_ffi.mjs", "get_access_token")
+fn get_access_token(room_id: String) -> String
+
 @external(javascript, "./frigo_ffi.mjs", "set_active_room_id")
-fn set_active_room_id(room_id: String) -> Nil
+fn set_active_room_id(room_id: String, access_token: String) -> Nil
 
 @external(javascript, "./frigo_ffi.mjs", "sanitize_room_id")
 fn sanitize_room_id(room_id: String) -> String
@@ -63,12 +71,16 @@ fn random_room_id() -> String
 @external(javascript, "./frigo_ffi.mjs", "start_sync")
 fn do_start_sync(
   room_id: String,
+  access_token: String,
   on_sync: fn(dynamic.Dynamic) -> Nil,
   on_status: fn(Bool) -> Nil,
 ) -> Nil
 
 @external(javascript, "./frigo_ffi.mjs", "broadcast_items_json")
 fn broadcast_items_json(json_string: String) -> Nil
+
+@external(javascript, "./frigo_ffi.mjs", "broadcast_delta_json")
+fn broadcast_delta_json(json_string: String) -> Nil
 
 @external(javascript, "./frigo_ffi.mjs", "share_room_link")
 fn share_room_link(room_id: String) -> Bool
@@ -108,6 +120,22 @@ fn persist_and_broadcast_effect(
   })
 }
 
+fn save_delta(
+  model: Model,
+  items: List(Item),
+  delta: String,
+) -> #(Model, effect.Effect(Message)) {
+  let sorted = sort_items(items)
+  #(
+    Model(..model, items: sorted),
+    effect.from(fn(_) {
+      let _ =
+        varasto.set(model.items_storage, "items_" <> model.room_id, sorted)
+      broadcast_delta_json(delta)
+    }),
+  )
+}
+
 /// Sort, store in the model, persist locally and broadcast.
 fn save(model: Model, items: List(Item)) -> #(Model, effect.Effect(Message)) {
   let sorted = sort_items(items)
@@ -121,6 +149,7 @@ fn start_sync_effect(room_id: String) -> effect.Effect(Message) {
   effect.from(fn(dispatch) {
     do_start_sync(
       room_id,
+      get_access_token(room_id),
       fn(raw) { dispatch(RemoteItemsReceived(raw)) },
       fn(status) { dispatch(ConnectionStatusChanged(status)) },
     )
@@ -161,24 +190,76 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
       case name {
         "" -> #(model, effect.none())
         _ -> {
-          save(model, merge_item(model.items, name, count, category))
+          let updated = merge_item(model.items, name, count, category)
+          let assert Ok(changed) =
+            list.find(updated, fn(item) { item.name == name })
+          let operation = case
+            list.any(model.items, fn(item) { item.name == name })
+          {
+            True -> "item_updated"
+            False -> "item_added"
+          }
+          save_delta(
+            model,
+            updated,
+            json.object([
+              #("type", json.string(operation)),
+              #(
+                "item",
+                json.object([
+                  #("id", json.string(changed.id)),
+                  #("name", json.string(changed.name)),
+                  #("number", json.int(changed.amount)),
+                  #("checked", json.bool(changed.checked)),
+                  #("category", json.string(changed.category)),
+                ]),
+              ),
+            ])
+              |> json.to_string,
+          )
         }
       }
     }
 
-    UserToggledItem(name) ->
-      save(
-        model,
+    UserToggledItem(id) -> {
+      let updated =
         list.map(model.items, fn(item) {
-          case item.name == name {
+          case item.id == id {
             True -> Item(..item, checked: !item.checked)
             False -> item
           }
-        }),
+        })
+      let assert Ok(changed) = list.find(updated, fn(item) { item.id == id })
+      save_delta(
+        model,
+        updated,
+        json.object([
+          #("type", json.string("item_updated")),
+          #(
+            "item",
+            json.object([
+              #("id", json.string(changed.id)),
+              #("name", json.string(changed.name)),
+              #("number", json.int(changed.amount)),
+              #("checked", json.bool(changed.checked)),
+              #("category", json.string(changed.category)),
+            ]),
+          ),
+        ])
+          |> json.to_string,
       )
+    }
 
-    UserDeletedItem(name) ->
-      save(model, list.filter(model.items, fn(item) { item.name != name }))
+    UserDeletedItem(id) ->
+      save_delta(
+        model,
+        list.filter(model.items, fn(item) { item.id != id }),
+        json.object([
+          #("type", json.string("item_deleted")),
+          #("id", json.string(id)),
+        ])
+          |> json.to_string,
+      )
 
     // --- Clear list ----------------------------------------------------------
     UserAskedToDeleteList -> #(
@@ -197,10 +278,10 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
     }
 
     // --- Inline editing ------------------------------------------------------
-    UserClickedItem(name, amount, category) -> #(
+    UserClickedItem(id, name, amount, category) -> #(
       Model(
         ..model,
-        editing: Some(name),
+        editing: Some(id),
         draft_name: name,
         draft_amount: int.to_string(amount),
         draft_category: category,
@@ -226,10 +307,10 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
     UserConfirmedEdit ->
       case model.editing {
         None -> #(model, effect.none())
-        Some(original_name) -> {
+        Some(original_id) -> {
           let new_name = string.capitalise(string.trim(model.draft_name))
           let original =
-            list.find(model.items, fn(item) { item.name == original_name })
+            list.find(model.items, fn(item) { item.id == original_id })
 
           case new_name, int.parse(model.draft_amount), original {
             "", _, _ | _, Error(_), _ | _, _, Error(_) -> #(
@@ -238,13 +319,14 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
             )
             _, Ok(new_amount), Ok(original_item) -> {
               let others =
-                list.filter(model.items, fn(item) { item.name != original_name })
+                list.filter(model.items, fn(item) { item.id != original_id })
 
               let updated = case
                 list.find(others, fn(item) { item.name == new_name })
               {
                 Ok(existing) -> [
                   Item(
+                    existing.id,
                     new_name,
                     existing.amount + new_amount,
                     False,
@@ -254,6 +336,7 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
                 ]
                 Error(_) -> [
                   Item(
+                    original_item.id,
                     name: new_name,
                     amount: new_amount,
                     checked: original_item.checked,
@@ -286,9 +369,13 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
       case is_null_file(file) {
         True -> #(model, effect.none())
         False -> #(
-          Model(..model, scanning: True),
+          Model(..model, scanning: True, ocr_error: None),
           effect.from(fn(dispatch) {
-            do_scan_image(file, fn(text) { dispatch(UserScannedText(text)) })
+            do_scan_image(
+              file,
+              fn(text) { dispatch(UserScannedText(text)) },
+              fn(error) { dispatch(UserScanFailed(error)) },
+            )
           }),
         )
       }
@@ -308,8 +395,13 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
         })
 
       let #(m, eff) = save(model, updated)
-      #(Model(..m, scanning: False), eff)
+      #(Model(..m, scanning: False, ocr_error: None), eff)
     }
+
+    UserScanFailed(error) -> #(
+      Model(..model, scanning: False, ocr_error: Some(error)),
+      effect.none(),
+    )
 
     // --- Real-time sync ------------------------------------------------------
     RemoteItemsReceived(raw) ->
@@ -400,7 +492,9 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
             connection_status: Connecting,
           ),
           effect.batch([
-            effect.from(fn(_) { set_active_room_id(room) }),
+            effect.from(fn(_) {
+              set_active_room_id(room, get_access_token(room))
+            }),
             start_sync_effect(room),
           ]),
         )
@@ -430,6 +524,7 @@ fn init(_initial: Int) -> #(Model, effect.Effect(Message)) {
       collapsed_sections: [],
       room_id: room,
       connection_status: Connecting,
+      ocr_error: None,
       show_share_modal: False,
       show_switch_modal: False,
       switch_room_input: "",
@@ -437,7 +532,7 @@ fn init(_initial: Int) -> #(Model, effect.Effect(Message)) {
     ),
     effect.batch([
       effect.from(fn(dispatch) {
-        enable_swipe_to_delete(fn(name) { dispatch(UserDeletedItem(name)) })
+        enable_swipe_to_delete(fn(id) { dispatch(UserDeletedItem(id)) })
       }),
       start_sync_effect(room),
     ]),

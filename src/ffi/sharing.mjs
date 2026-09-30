@@ -1,8 +1,10 @@
 import QRCode from "qrcode";
+import { get_access_token } from "./sync.mjs";
 
 export function get_share_link(room_id) {
   const url = new URL(window.location.href);
   url.searchParams.set("list", room_id);
+  url.searchParams.set("access", get_access_token(room_id));
   url.hash = "";
   return url.toString();
 }

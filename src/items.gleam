@@ -7,7 +7,13 @@ import gleam/result
 import gleam/string
 
 pub type Item {
-  Item(name: String, amount: Int, checked: Bool, category: String)
+  Item(id: String, name: String, amount: Int, checked: Bool, category: String)
+}
+
+pub fn new_id() -> String {
+  "item-"
+  <> int.to_base16(int.random(2_147_483_647))
+  <> int.to_base16(int.random(2_147_483_647))
 }
 
 /// Unchecked first, then alphabetical.
@@ -36,7 +42,7 @@ pub fn merge_item(
           False -> item
         }
       })
-    False -> [Item(name, amount, False, category), ..items]
+    False -> [Item(new_id(), name, amount, False, category), ..items]
   }
 }
 
@@ -63,16 +69,18 @@ pub fn parse_scanned_line(line: String) -> #(String, Int) {
 pub fn reader() {
   decode.list({
     use name <- decode.field("name", decode.string)
+    use id <- decode.optional_field("id", "legacy-" <> name, decode.string)
     use amount <- decode.field("number", decode.int)
     use checked <- decode.field("checked", decode.bool)
     use category <- decode.optional_field("category", "📦 Otros", decode.string)
-    decode.success(Item(name:, amount:, checked:, category:))
+    decode.success(Item(id:, name:, amount:, checked:, category:))
   })
 }
 
 pub fn writer(items: List(Item)) {
   use item <- json.array(items)
   json.object([
+    #("id", json.string(item.id)),
     #("checked", json.bool(item.checked)),
     #("name", json.string(item.name)),
     #("number", json.int(item.amount)),
