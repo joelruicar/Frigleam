@@ -63,7 +63,7 @@ function should_use_remote_ocr() {
   return get_remote_ocr_url() !== "" && is_mobile_like_device();
 }
 
-function render_to_canvas(source, max_width, quality) {
+function render_to_canvas(source, max_width) {
   const scale = Math.min(1, max_width / source.width);
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(source.width * scale));
@@ -82,7 +82,7 @@ function render_to_canvas(source, max_width, quality) {
 }
 
 function preprocess_image(source) {
-  return render_to_canvas(source, 1800, "high");
+  return render_to_canvas(source, 1800);
 }
 
 async function canvas_to_blob(canvas, mime_type, quality) {
@@ -99,15 +99,13 @@ async function canvas_to_blob(canvas, mime_type, quality) {
 
 async function build_mobile_upload(file) {
   const source = await file_to_bitmap(file);
-  const canvas = render_to_canvas(source, 1400, "medium");
+  const canvas = render_to_canvas(source, 1400);
   return await canvas_to_blob(canvas, "image/jpeg", 0.82);
 }
 
 async function scan_image_remote(file) {
-  const endpoint = get_remote_ocr_url();
-  if (endpoint === "") {
-    throw new Error("No hay endpoint OCR configurado.");
-  }
+  const customUrl = window.FRIGO_OCR_URL ? window.FRIGO_OCR_URL.trim() : "";
+  const endpoint = customUrl !== "" ? customUrl : `${get_base_url()}/api/ocr`;
 
   const form_data = new FormData();
   form_data.append("file", await build_mobile_upload(file), "ocr.jpg");
@@ -118,7 +116,8 @@ async function scan_image_remote(file) {
   });
 
   if (!response.ok) {
-    throw new Error(`OCR remoto falló con estado ${response.status}`);
+    const errorText = await response.text().catch(() => "");
+    throw new Error(`OCR falló con estado ${response.status}: ${errorText}`);
   }
 
   const content_type = response.headers.get("content-type") || "";
@@ -131,35 +130,34 @@ async function scan_image_remote(file) {
 }
 
 export async function scan_image(file, dispatch) {
-  if (should_use_remote_ocr()) {
+  // 1. Intento primario con Cloudflare Workers AI (/api/ocr)
+  try {
+    const text = await scan_image_remote(file);
+    if (text && text.trim() !== "") {
+      dispatch(text);
+      return;
+    }
+  } catch (err) {
+    console.warn("Workers AI OCR falló, intentando fallback:", err);
+  }
+
+  // 2. Fallback a Tesseract local si está cargado
+  if (typeof window.Tesseract !== "undefined") {
     try {
-      dispatch(await scan_image_remote(file));
+      const source = preprocess_image(await file_to_bitmap(file));
+      const { data } = await window.Tesseract.recognize(source, "spa+eng", {
+        tessedit_pageseg_mode: "6",
+        preserve_interword_spaces: "1",
+        user_defined_dpi: "300",
+      });
+      dispatch((data.text || "").trim());
       return;
     } catch (err) {
-      console.warn("OCR remoto falló, usando Tesseract local:", err);
+      console.error("Error en fallback Tesseract:", err);
     }
   }
 
-  if (typeof window.Tesseract === "undefined") {
-    console.error(
-      "Tesseract.js no está cargado. Añade el <script> en index.html.",
-    );
-    dispatch("");
-    return;
-  }
-
-  try {
-    const source = preprocess_image(await file_to_bitmap(file));
-    const { data } = await window.Tesseract.recognize(source, "spa+eng", {
-      tessedit_pageseg_mode: "6",
-      preserve_interword_spaces: "1",
-      user_defined_dpi: "300",
-    });
-    dispatch((data.text || "").trim());
-  } catch (err) {
-    console.error("Error al escanear la imagen:", err);
-    dispatch("");
-  }
+  dispatch("");
 }
 
 // =============================================================================
@@ -172,7 +170,11 @@ let current_room_id = "";
 let remote_sync_callback = null;
 let status_change_callback = null;
 
-function generate_random_slug() {
+export function sanitize_room_id(value) {
+  return String(value).trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
+}
+
+export function random_room_id() {
   const chars = "abcdefghjkmnpqrstuvwxyz23456789";
   let result = "frigo-";
   for (let i = 0; i < 4; i++) {
@@ -184,30 +186,31 @@ function generate_random_slug() {
 export function get_active_room_id() {
   // 1. Query parameter ?list=xyz
   const params = new URLSearchParams(window.location.search);
-  const listParam = params.get("list");
-  if (listParam && listParam.trim() !== "") {
-    const clean = listParam.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
-    localStorage.setItem("frigo_active_room", clean);
-    return clean;
+  const fromQuery = sanitize_room_id(params.get("list") ?? "");
+  if (fromQuery) {
+    localStorage.setItem("frigo_active_room", fromQuery);
+    return fromQuery;
   }
 
   // 2. Hash #list/xyz or #xyz
   if (window.location.hash) {
-    const cleanHash = window.location.hash.replace(/^#\/?(list\/)?/, "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
-    if (cleanHash !== "") {
+    const cleanHash = sanitize_room_id(
+      window.location.hash.replace(/^#\/?(list\/)?/, ""),
+    );
+    if (cleanHash) {
       localStorage.setItem("frigo_active_room", cleanHash);
       return cleanHash;
     }
   }
 
   // 3. Stored room in localStorage
-  const stored = localStorage.getItem("frigo_active_room");
-  if (stored && stored.trim() !== "") {
-    return stored.trim();
+  const stored = sanitize_room_id(localStorage.getItem("frigo_active_room") ?? "");
+  if (stored) {
+    return stored;
   }
 
   // 4. Generate new friendly room ID
-  const newId = generate_random_slug();
+  const newId = random_room_id();
   localStorage.setItem("frigo_active_room", newId);
   try {
     const url = new URL(window.location.href);
@@ -219,10 +222,9 @@ export function get_active_room_id() {
 }
 
 export function set_active_room_id(roomId) {
-  const clean = roomId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  const clean = sanitize_room_id(roomId);
   if (!clean) return;
 
-  current_room_id = clean;
   localStorage.setItem("frigo_active_room", clean);
 
   try {
@@ -230,9 +232,6 @@ export function set_active_room_id(roomId) {
     url.searchParams.set("list", clean);
     window.history.pushState({}, "", url.toString());
   } catch (_e) {}
-
-  // Re-establish connection for the new room
-  connect_socket();
 }
 
 function get_base_url() {
@@ -296,14 +295,7 @@ function connect_socket() {
       schedule_reconnect();
     };
 
-    ws.onerror = () => {
-      if (status_change_callback) {
-        status_change_callback(false);
-      }
-      try {
-        ws.close();
-      } catch (_e) {}
-    };
+    ws.onerror = () => ws.close();
   } catch (e) {
     console.error("Error conectando WebSocket:", e);
     schedule_reconnect();
@@ -340,25 +332,18 @@ export function start_sync(roomId, onRemoteSync, onStatusChange) {
     .catch(() => {});
 }
 
-export function broadcast_items_json(jsonString) {
-  try {
-    const items = JSON.parse(jsonString);
-
-    // 1. WebSocket message
-    if (active_ws && active_ws.readyState === WebSocket.OPEN) {
-      active_ws.send(JSON.stringify({ type: "set_items", items }));
-    }
-
-    // 2. HTTP backup POST to guarantee edge persistence
-    const baseUrl = get_base_url();
-    fetch(`${baseUrl}/api/room/${encodeURIComponent(current_room_id)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
-    }).catch(() => {});
-  } catch (err) {
-    console.error("Error broadcasting items:", err);
+export function broadcast_items_json(json) {
+  if (active_ws && active_ws.readyState === WebSocket.OPEN) {
+    active_ws.send(`{"type":"set_items","items":${json}}`);
+    return;
   }
+
+  // Socket down: fall back to HTTP so the change still reaches the server.
+  fetch(`${get_base_url()}/api/room/${encodeURIComponent(current_room_id)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: `{"items":${json}}`,
+  }).catch(() => {});
 }
 
 export function get_share_link(roomId) {
@@ -369,20 +354,7 @@ export function get_share_link(roomId) {
 }
 
 export function copy_to_clipboard(text) {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).catch(() => {});
-    return true;
-  }
-  // Fallback for older browsers
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  document.body.appendChild(textarea);
-  textarea.select();
-  try {
-    document.execCommand("copy");
-  } catch (_e) {}
-  document.body.removeChild(textarea);
-  return true;
+  navigator.clipboard?.writeText(text).catch(() => {});
 }
 
 export function share_room_link(roomId) {
@@ -395,10 +367,9 @@ export function share_room_link(roomId) {
         url: link,
       })
       .catch(() => {});
-    return true;
+  } else {
+    copy_to_clipboard(link);
   }
-
-  return copy_to_clipboard(link);
 }
 
 export function render_qr_code(elementId, text) {
@@ -488,6 +459,7 @@ export function enable_swipe_to_delete(onSwipe) {
         onSwipe(item.getAttribute("data-swipe-item"));
       }, 180);
     } else {
+      item.classList.remove("swiping");
       item.classList.add("swipe-cancelled");
       item.style.removeProperty("--swipe-distance");
       setTimeout(() => {

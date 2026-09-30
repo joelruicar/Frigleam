@@ -24,8 +24,8 @@ body {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding: env(safe-area-inset-top, 2rem) env(safe-area-inset-right, 0.75rem)
-    env(safe-area-inset-bottom, 2rem) env(safe-area-inset-left, 0.75rem);
+  padding: max(2rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right))
+    max(2rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
   background: #23252a;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     sans-serif;
@@ -548,8 +548,7 @@ body {
   color: var(--muted);
 }
 
-.share-input-row,
-.switch-input-row {
+.share-input-row {
   display: flex;
   gap: 8px;
   margin-bottom: 1rem;
@@ -573,20 +572,14 @@ body {
   gap: 8px;
 }
 
-.modal-actions-column {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 /* ==========================================================================
    Mobile Responsive Adjustments
    ========================================================================== */
 
 @media (max-width: 480px) {
   body {
-    padding: env(safe-area-inset-top, 0.75rem) 0.5rem
-      env(safe-area-inset-bottom, 0.75rem) 0.5rem;
+    padding: max(0.75rem, env(safe-area-inset-top)) 0.5rem
+      max(0.75rem, env(safe-area-inset-bottom)) 0.5rem;
   }
 
   .frigo-container {

@@ -1,4 +1,4 @@
-import frigo.{CheckedItem, UncheckedItem, is_checked, parse_scanned_line, sort_items}
+import frigo.{Item, parse_scanned_line, sort_items}
 import gleeunit
 import gleeunit/should
 
@@ -26,24 +26,19 @@ pub fn parse_scanned_line_without_number_defaults_to_one_test() {
 
 pub fn sort_items_puts_unchecked_first_and_alphabetical_test() {
   let items = [
-    CheckedItem("Pan", 1),
-    UncheckedItem("Tomates", 3),
-    UncheckedItem("Aguacates", 2),
-    CheckedItem("Aceite", 1),
+    Item("Pan", 1, True),
+    Item("Tomates", 3, False),
+    Item("Aguacates", 2, False),
+    Item("Aceite", 1, True),
   ]
 
   let sorted = sort_items(items)
 
   sorted
   |> should.equal([
-    UncheckedItem("Aguacates", 2),
-    UncheckedItem("Tomates", 3),
-    CheckedItem("Aceite", 1),
-    CheckedItem("Pan", 1),
+    Item("Aguacates", 2, False),
+    Item("Tomates", 3, False),
+    Item("Aceite", 1, True),
+    Item("Pan", 1, True),
   ])
-}
-
-pub fn is_checked_test() {
-  is_checked(CheckedItem("Queso", 1)) |> should.be_true
-  is_checked(UncheckedItem("Queso", 1)) |> should.be_false
 }
