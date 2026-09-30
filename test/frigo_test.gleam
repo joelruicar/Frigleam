@@ -1,4 +1,4 @@
-import frigo.{Item, parse_scanned_line, sort_items}
+import frigo.{Item, infer_category, merge_item, parse_scanned_line, sort_items}
 import gleeunit
 import gleeunit/should
 
@@ -26,19 +26,45 @@ pub fn parse_scanned_line_without_number_defaults_to_one_test() {
 
 pub fn sort_items_puts_unchecked_first_and_alphabetical_test() {
   let items = [
-    Item("Pan", 1, True),
-    Item("Tomates", 3, False),
-    Item("Aguacates", 2, False),
-    Item("Aceite", 1, True),
+    Item("Pan", 1, True, "🥖 Panadería"),
+    Item("Tomates", 3, False, "🥬 Frutas y verduras"),
+    Item("Aguacates", 2, False, "🥬 Frutas y verduras"),
+    Item("Aceite", 1, True, "🥫 Despensa"),
   ]
 
   let sorted = sort_items(items)
 
   sorted
   |> should.equal([
-    Item("Aguacates", 2, False),
-    Item("Tomates", 3, False),
-    Item("Aceite", 1, True),
-    Item("Pan", 1, True),
+    Item("Aguacates", 2, False, "🥬 Frutas y verduras"),
+    Item("Tomates", 3, False, "🥬 Frutas y verduras"),
+    Item("Aceite", 1, True, "🥫 Despensa"),
+    Item("Pan", 1, True, "🥖 Panadería"),
   ])
+}
+
+pub fn infer_category_test() {
+  infer_category("Tofu ahumado") |> should.equal("🌱 Veggie")
+  infer_category("Hamburguesa vegana") |> should.equal("🌱 Veggie")
+  infer_category("Hummus tradicional") |> should.equal("🌱 Veggie")
+  infer_category("Tomates cherry") |> should.equal("🥬 Frutas y verduras")
+  infer_category("Leche desnatada") |> should.equal("🥛 Lácteos y huevos")
+  infer_category("Pechuga de pollo") |> should.equal("🥩 Carne y pescado")
+  infer_category("Pan de molde") |> should.equal("🥖 Panadería")
+  infer_category("Detergente lavadora") |> should.equal("🧼 Limpieza")
+  infer_category("Helado de vainilla") |> should.equal("🧊 Congelados")
+  infer_category("Pienso para perros") |> should.equal("🐾 Mascotas")
+  infer_category("Pañales dodot") |> should.equal("👶 Bebé")
+  infer_category("Ibuprofeno 600") |> should.equal("💊 Farmacia y salud")
+  infer_category("Pilas AA") |> should.equal("🏠 Hogar y bazar")
+  infer_category("Chocolate negro") |> should.equal("🍫 Dulces y snacks")
+  infer_category("Objeto desconocido 123") |> should.equal("📦 Otros")
+}
+
+pub fn merge_item_accumulates_amount_test() {
+  let initial = [Item("Manzanas", 2, True, "🥬 Frutas y verduras")]
+  let updated = merge_item(initial, "Manzanas", 3, "🥬 Frutas y verduras")
+
+  updated
+  |> should.equal([Item("Manzanas", 5, False, "🥬 Frutas y verduras")])
 }
