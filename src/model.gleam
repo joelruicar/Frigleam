@@ -14,12 +14,15 @@ pub type Model {
     draft_amount: String,
     draft_category: String,
     collapsed_sections: List(String),
+    selected_tab: String,
     room_id: String,
     connection_status: ConnectionStatus,
+    ocr_error: Option(String),
     show_share_modal: Bool,
     show_switch_modal: Bool,
     switch_room_input: String,
     copied_toast: Bool,
+    show_cart_menu: Bool,
   )
 }
 
@@ -37,14 +40,16 @@ pub type Message {
   UserAskedToDeleteList
   UserCancelledDeleteList
   UserConfirmedDeleteList
-  UserClickedItem(name: String, amount: Int, category: String)
+  UserClickedItem(id: String, name: String, amount: Int, category: String)
   UserChangedDraftName(String)
   UserChangedDraftAmount(String)
   UserChangedDraftCategory(String)
   UserConfirmedEdit
+  UserSelectedTab(String)
   UserToggledSection(category: String)
   UserSelectedImage(dynamic.Dynamic)
   UserScannedText(String)
+  UserScanFailed(String)
   RemoteItemsReceived(dynamic.Dynamic)
   ConnectionStatusChanged(Bool)
   UserOpenedShareModal
@@ -56,4 +61,5 @@ pub type Message {
   UserChangedSwitchInput(String)
   UserConfirmedSwitchRoom
   UserGenerateRandomRoom
+  UserToggledCartMenu
 }

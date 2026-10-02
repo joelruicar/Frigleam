@@ -2,62 +2,44 @@ import categories
 import gleam/dynamic/decode
 import gleam/int
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import items.{type Item}
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import model.{
-  type Message, type Model, Connected, Connecting, Disconnected, Noop,
+  type Message, type Model, Noop,
   UserAddedItem, UserAskedToDeleteList, UserCancelledDeleteList,
   UserChangedDraftAmount, UserChangedDraftCategory, UserChangedDraftName,
   UserChangedSwitchInput, UserClickedCopyLink, UserClickedItem,
   UserClickedNativeShare, UserClosedShareModal, UserClosedSwitchModal,
   UserConfirmedDeleteList, UserConfirmedEdit, UserConfirmedSwitchRoom,
   UserDeletedItem, UserGenerateRandomRoom, UserOpenedShareModal,
-  UserOpenedSwitchModal, UserSelectedImage, UserToggledItem, UserToggledSection,
-}
-
-fn modal(
-  on_close: Message,
-  title: String,
-  children: List(Element(Message)),
-) -> Element(Message) {
-  html.div([attribute.class("modal-backdrop"), event.on_click(on_close)], [
-    html.div(
-      [
-        attribute.class("modal"),
-        event.stop_propagation(event.on_click(Noop)),
-      ],
-      [
-        html.h3([attribute.class("modal-title")], [element.text(title)]),
-        ..children
-      ],
-    ),
-  ])
-}
-
-fn text_button(
-  class: String,
-  on_click: Message,
-  label: String,
-) -> Element(Message) {
-  html.button([attribute.class(class), event.on_click(on_click)], [
-    element.text(label),
-  ])
+  UserOpenedSwitchModal, UserSelectedImage, UserSelectedTab,
+  UserToggledCartMenu, UserToggledItem,
 }
 
 fn view_item(model: Model, item: Item) -> Element(Message) {
   let checkbox =
-    html.input([
-      attribute.type_("checkbox"),
-      attribute.checked(item.checked),
-      event.on_click(UserToggledItem(item.name)),
-    ])
+    html.button(
+      [
+        attribute.type_("button"),
+        attribute.classes([
+          #("custom-checkbox", True),
+          #("checked", item.checked),
+        ]),
+        event.on_click(UserToggledItem(item.id)),
+        attribute.attribute("aria-label", case item.checked {
+          True -> "Desmarcar " <> item.name
+          False -> "Marcar " <> item.name
+        }),
+      ],
+      [],
+    )
 
   case model.editing {
-    Some(name) if name == item.name ->
+    Some(id) if id == item.id ->
       html.li([attribute.class("grocery-item editing")], [
         checkbox,
         html.div([attribute.class("edit-fields-column")], [
@@ -103,11 +85,19 @@ fn view_item(model: Model, item: Item) -> Element(Message) {
 
     _ -> {
       let edit =
-        event.on_click(UserClickedItem(item.name, item.amount, item.category))
+        event.on_click(UserClickedItem(
+          item.id,
+          item.name,
+          item.amount,
+          item.category,
+        ))
       html.li(
         [
-          attribute.class("grocery-item"),
-          attribute.attribute("data-swipe-item", item.name),
+          attribute.classes([
+            #("grocery-item", True),
+            #("item-checked", item.checked),
+          ]),
+          attribute.attribute("data-swipe-item", item.id),
         ],
         [
           checkbox,
@@ -134,7 +124,7 @@ fn view_item(model: Model, item: Item) -> Element(Message) {
           html.button(
             [
               attribute.class("delete-btn"),
-              event.on_click(UserDeletedItem(item.name)),
+              event.on_click(UserDeletedItem(item.id)),
               attribute.attribute("aria-label", "Borrar item"),
             ],
             [element.text("×")],
@@ -149,46 +139,61 @@ fn view_share_modal(model: Model, share_url: String) -> Element(Message) {
   case model.show_share_modal {
     False -> element.none()
     True ->
-      modal(UserClosedShareModal, "Compartir lista", [
-        html.p([attribute.class("modal-desc")], [
-          element.text(
-            "Cualquiera con este enlace o código podrá ver y editar la lista en tiempo real:",
+      html.div(
+        [
+          attribute.class("modal-backdrop"),
+          event.on_click(UserClosedShareModal),
+        ],
+        [
+          html.div(
+            [
+              attribute.class("share-modal-sheet"),
+              event.stop_propagation(event.on_click(Noop)),
+            ],
+            [
+              html.div([attribute.class("qr-centered-box")], [
+                html.div([attribute.id("share-qr-code")], []),
+              ]),
+              html.div([attribute.class("share-url-row")], [
+                html.input([
+                  attribute.class("share-url-pill"),
+                  attribute.value(share_url),
+                  attribute.readonly(True),
+                ]),
+                html.button(
+                  [
+                    attribute.type_("button"),
+                    attribute.class("btn-copy-pill"),
+                    event.on_click(UserClickedCopyLink),
+                  ],
+                  [
+                    element.text(case model.copied_toast {
+                      True -> "¡Copiado!"
+                      False -> "Copiar"
+                    }),
+                  ],
+                ),
+              ]),
+              html.button(
+                [
+                  attribute.type_("button"),
+                  attribute.class("btn-share-por-pill"),
+                  event.on_click(UserClickedNativeShare),
+                ],
+                [element.text("Compartir por...")],
+              ),
+              html.button(
+                [
+                  attribute.type_("button"),
+                  attribute.class("btn-cerrar-outline-pill"),
+                  event.on_click(UserClosedShareModal),
+                ],
+                [element.text("Cerrar")],
+              ),
+            ],
           ),
-        ]),
-        html.div([attribute.class("qr-wrapper")], [
-          html.div([attribute.id("share-qr-code")], []),
-          html.span([attribute.class("qr-hint")], [
-            element.text("Escanea con la cámara de otro móvil"),
-          ]),
-        ]),
-        html.div([attribute.class("share-input-row")], [
-          html.input([
-            attribute.class("input share-url-input"),
-            attribute.value(share_url),
-            attribute.readonly(True),
-          ]),
-          text_button(
-            "btn copy-btn",
-            UserClickedCopyLink,
-            case model.copied_toast {
-              True -> "¡Copiado!"
-              False -> "Copiar"
-            },
-          ),
-        ]),
-        html.div([attribute.class("modal-actions")], [
-          text_button(
-            "btn btn-primary full-width",
-            UserClickedNativeShare,
-            "📲 Enviar por WhatsApp / Compartir",
-          ),
-          text_button(
-            "btn btn-secondary full-width",
-            UserClosedShareModal,
-            "Cerrar",
-          ),
-        ]),
-      ])
+        ],
+      )
   }
 }
 
@@ -196,38 +201,60 @@ fn view_switch_modal(model: Model) -> Element(Message) {
   case model.show_switch_modal {
     False -> element.none()
     True ->
-      modal(UserClosedSwitchModal, "Cambiar de lista", [
-        html.p([attribute.class("modal-desc")], [
-          element.text(
-            "Introduce el nombre o código de la lista a la que quieres unirte:",
+      html.div(
+        [
+          attribute.class("modal-backdrop"),
+          event.on_click(UserClosedSwitchModal),
+        ],
+        [
+          html.div(
+            [
+              attribute.class("switch-modal-sheet"),
+              event.stop_propagation(event.on_click(Noop)),
+            ],
+            [
+              html.h3([attribute.class("sheet-title")], [element.text("Mis listas")]),
+              html.p([attribute.class("sheet-desc")], [
+                element.text("Introduce el nombre de la lista:"),
+              ]),
+              html.div([attribute.class("sheet-input-row")], [
+                html.input([
+                  attribute.class("sheet-input-pill"),
+                  attribute.placeholder("Ej: casa, finde..."),
+                  attribute.value(model.switch_room_input),
+                  event.on_input(UserChangedSwitchInput),
+                ]),
+              ]),
+              html.div([attribute.class("sheet-actions")], [
+                html.button(
+                  [
+                    attribute.type_("button"),
+                    attribute.class("btn-share-por-pill"),
+                    event.on_click(UserConfirmedSwitchRoom),
+                  ],
+                  [element.text("Unirme a esta lista")],
+                ),
+                html.button(
+                  [
+                    attribute.type_("button"),
+                    attribute.class("btn-random-pill"),
+                    event.on_click(UserGenerateRandomRoom),
+                  ],
+                  [element.text("🎲 Generar código aleatorio")],
+                ),
+                html.button(
+                  [
+                    attribute.type_("button"),
+                    attribute.class("btn-cerrar-outline-pill"),
+                    event.on_click(UserClosedSwitchModal),
+                  ],
+                  [element.text("Cerrar")],
+                ),
+              ]),
+            ],
           ),
-        ]),
-        html.div([attribute.class("share-input-row")], [
-          html.input([
-            attribute.class("input"),
-            attribute.placeholder("Ej: casa, finde, compra-familia"),
-            attribute.value(model.switch_room_input),
-            event.on_input(UserChangedSwitchInput),
-          ]),
-        ]),
-        html.div([attribute.class("modal-actions")], [
-          text_button(
-            "btn btn-primary full-width",
-            UserConfirmedSwitchRoom,
-            "Unirme a esta lista",
-          ),
-          text_button(
-            "btn btn-secondary full-width",
-            UserGenerateRandomRoom,
-            "🎲 Generar código aleatorio",
-          ),
-          text_button(
-            "btn btn-secondary full-width",
-            UserClosedSwitchModal,
-            "Cancelar",
-          ),
-        ]),
-      ])
+        ],
+      )
   }
 }
 
@@ -235,77 +262,48 @@ fn view_delete_modal(model: Model) -> Element(Message) {
   case model.confirm_delete_list {
     False -> element.none()
     True ->
-      modal(UserCancelledDeleteList, "¿Vaciar toda la lista?", [
-        html.div([attribute.class("modal-actions")], [
-          text_button("btn btn-secondary", UserCancelledDeleteList, "Cancelar"),
-          text_button("btn btn-danger", UserConfirmedDeleteList, "Vaciar"),
-        ]),
-      ])
+      html.div(
+        [
+          attribute.class("modal-backdrop"),
+          event.on_click(UserCancelledDeleteList),
+        ],
+        [
+          html.div(
+            [
+              attribute.class("delete-modal-sheet"),
+              event.stop_propagation(event.on_click(Noop)),
+            ],
+            [
+              html.h3([attribute.class("sheet-title")], [
+                element.text("¿Vaciar toda la lista?"),
+              ]),
+              html.div([attribute.class("sheet-actions-row")], [
+                html.button(
+                  [
+                    attribute.type_("button"),
+                    attribute.class("btn-cerrar-outline-pill"),
+                    event.on_click(UserCancelledDeleteList),
+                  ],
+                  [element.text("Cancelar")],
+                ),
+                html.button(
+                  [
+                    attribute.type_("button"),
+                    attribute.class("btn-delete-confirm-pill"),
+                    event.on_click(UserConfirmedDeleteList),
+                  ],
+                  [element.text("Vaciar")],
+                ),
+              ]),
+            ],
+          ),
+        ],
+      )
   }
 }
 
-fn view_category_section(
-  model: Model,
-  category: String,
-  items: List(Item),
-) -> Element(Message) {
-  let is_collapsed = list.contains(model.collapsed_sections, category)
-  let total_count = list.length(items)
-  let done_count = list.count(items, fn(item) { item.checked })
-  let pending_count = total_count - done_count
-  let all_done = total_count > 0 && done_count == total_count
-
-  html.section([attribute.class("category-section")], [
-    html.div(
-      [
-        attribute.class("category-header"),
-        event.on_click(UserToggledSection(category)),
-      ],
-      [
-        html.div([attribute.class("category-title")], [
-          html.span(
-            [
-              attribute.classes([
-                #("category-arrow", True),
-                #("collapsed", is_collapsed),
-              ]),
-            ],
-            [
-              element.text(case is_collapsed {
-                True -> "▶"
-                False -> "▼"
-              }),
-            ],
-          ),
-          element.text(category),
-        ]),
-        html.span([attribute.class("category-badge")], [
-          element.text(case all_done {
-            True -> "✓ Completa"
-            False ->
-              int.to_string(pending_count)
-              <> " pendiente"
-              <> case pending_count == 1 {
-                True -> ""
-                False -> "s"
-              }
-          }),
-        ]),
-      ],
-    ),
-    case is_collapsed {
-      True -> element.none()
-      False ->
-        html.ul(
-          [attribute.class("list category-list")],
-          list.map(items, fn(item) { view_item(model, item) }),
-        )
-    },
-  ])
-}
-
 pub fn view(model: Model, share_url: String) -> Element(Message) {
-  let active_categories =
+  let standard_active =
     list.filter(categories.standard_categories, fn(category) {
       list.any(model.items, fn(item) { item.category == category })
     })
@@ -313,134 +311,242 @@ pub fn view(model: Model, share_url: String) -> Element(Message) {
     list.filter(model.items, fn(item) {
       !list.contains(categories.standard_categories, item.category)
     })
-  let sections =
-    list.map(active_categories, fn(category) {
-      view_category_section(
-        model,
-        category,
-        list.filter(model.items, fn(item) { item.category == category }),
-      )
-    })
-  let all_sections = case uncategorized_items {
-    [] -> sections
+  let active_categories = case uncategorized_items {
+    [] -> standard_active
     _ ->
-      list.append(sections, [
-        view_category_section(model, "📦 Otros", uncategorized_items),
-      ])
+      case list.contains(standard_active, "📦 Otros") {
+        True -> standard_active
+        False -> list.append(standard_active, ["📦 Otros"])
+      }
   }
 
-  html.div([attribute.class("frigo-container")], [
-    html.header([attribute.class("app-header")], [
-      html.button(
-        [
-          attribute.class("room-badge"),
-          event.on_click(UserOpenedSwitchModal),
-          attribute.title("Cambiar de lista"),
-        ],
-        [
-          html.span(
-            [
-              attribute.classes([
-                #("status-dot", True),
-                #("online", model.connection_status == Connected),
-                #("offline", model.connection_status == Disconnected),
-              ]),
-            ],
-            [],
-          ),
-          html.span([attribute.class("room-name")], [
-            element.text(model.room_id),
-          ]),
-          html.span([attribute.class("connection-label")], [
-            element.text(case model.connection_status {
-              Connecting -> "Conectando..."
-              Connected -> "Online"
-              Disconnected -> "Sin conexión"
-            }),
-          ]),
-          html.span([attribute.class("room-edit-icon")], [element.text("▾")]),
-        ],
-      ),
-      html.button(
-        [
-          attribute.class("share-btn"),
-          event.on_click(UserOpenedShareModal),
-          attribute.title("Compartir esta lista"),
-        ],
-        [element.text("👥 Compartir")],
-      ),
-    ]),
-    html.form([attribute.class("form"), event.on_submit(UserAddedItem)], [
-      html.input([
-        attribute.name("input_form"),
-        attribute.placeholder("Producto (ej: Leche)..."),
-        attribute.required(True),
-        attribute.class("input"),
-      ]),
-      html.input([
-        attribute.name("input_count"),
-        attribute.type_("number"),
-        attribute.class("input-number"),
-        attribute.min("1"),
-        attribute.value("1"),
-      ]),
-      html.select(
-        [
-          attribute.name("input_category"),
-          attribute.class("category-select"),
-          attribute.title("Categoría del producto"),
-        ],
-        [
-          html.option([attribute.value("")], "Automática"),
-          ..list.map(categories.standard_categories, fn(category) {
-            html.option([attribute.value(category)], category)
-          })
-        ],
-      ),
-      html.button([attribute.type_("submit"), attribute.class("btn")], [
-        element.text("Añadir"),
-      ]),
+  // If there are more than 2 categories (total tabs > 3 with "Todo"),
+  // use representative icons instead of text.
+  let too_many_tabs = list.length(active_categories) > 2
+
+  // Filter items by selected tab:
+  let displayed_items = case model.selected_tab {
+    "Todo" -> model.items
+    cat -> list.filter(model.items, fn(item) { item.category == cat })
+  }
+
+  let total_count = list.length(displayed_items)
+  let checked_count = list.count(displayed_items, fn(item) { item.checked })
+  let counter_str =
+    int.to_string(checked_count) <> "/" <> int.to_string(total_count)
+
+  let todo_tab =
+    html.button(
+      [
+        attribute.type_("button"),
+        attribute.classes([
+          #("tab-btn", True),
+          #("tab-todo", True),
+          #("active", model.selected_tab == "Todo"),
+        ]),
+        event.on_click(UserSelectedTab("Todo")),
+        attribute.title("Ver todos los productos"),
+      ],
+      [element.text("Todo")],
+    )
+
+  let category_tabs =
+    list.map(active_categories, fn(cat) {
+      let is_active = model.selected_tab == cat
+      let label = case too_many_tabs {
+        True -> categories.category_icon(cat)
+        False -> categories.category_short_name(cat)
+      }
       html.button(
         [
           attribute.type_("button"),
-          attribute.class("btn btn-danger"),
-          event.on_click(UserAskedToDeleteList),
-          attribute.title("Vaciar toda la lista"),
+          attribute.classes([
+            #("tab-btn", True),
+            #("tab-" <> categories.category_slug(cat), True),
+            #("active", is_active),
+            #("tab-icon-only", too_many_tabs),
+          ]),
+          event.on_click(UserSelectedTab(cat)),
+          attribute.title(cat),
+          attribute.attribute("aria-label", cat),
         ],
-        [element.text("Vaciar")],
-      ),
-    ]),
-    html.div([attribute.class("scan-section")], [
-      html.label(
+        [element.text(label)],
+      )
+    })
+
+  let all_tabs = [todo_tab, ..category_tabs]
+
+  html.div([attribute.class("frigo-container")], [
+    // Banner Frigleam + Cart badge with Dropdown
+    html.header([attribute.class("frigleam-header")], [
+      html.button(
         [
-          attribute.class("btn btn-scan"),
-          attribute.attribute("for", "scan-input"),
+          attribute.type_("button"),
+          attribute.class("cart-badge-ring"),
+          event.on_click(UserToggledCartMenu),
+          attribute.title("Menú de opciones"),
+          attribute.attribute("aria-label", "Menú de opciones"),
         ],
         [
-          element.text(case model.scanning {
-            True -> "📷 Escaneando imagen..."
-            False -> "📷 Escanear lista en papel"
-          }),
+          html.img([
+            attribute.src("/cart.png"),
+            attribute.alt("Carrito"),
+            attribute.class("cart-badge-img"),
+          ]),
         ],
       ),
-      html.input([
-        attribute.type_("file"),
-        attribute.id("scan-input"),
-        attribute.attribute("accept", "image/*"),
-        attribute.attribute("capture", "environment"),
-        attribute.attribute("hidden", ""),
-        event.on("change", decode.map(decode.dynamic, UserSelectedImage)),
+      case model.show_cart_menu {
+        False -> element.none()
+        True ->
+          html.div([attribute.class("cart-dropdown-menu")], [
+            html.button(
+              [
+                attribute.type_("button"),
+                attribute.class("dropdown-item-btn"),
+                event.on_click(UserOpenedSwitchModal),
+              ],
+              [element.text("Mis listas")],
+            ),
+            html.button(
+              [
+                attribute.type_("button"),
+                attribute.class("dropdown-item-btn"),
+                event.on_click(UserOpenedShareModal),
+              ],
+              [element.text("Compartir")],
+            ),
+            html.button(
+              [
+                attribute.type_("button"),
+                attribute.class("dropdown-item-btn"),
+                event.on_click(UserToggledCartMenu),
+              ],
+              [element.text("Lenguaje")],
+            ),
+            html.button(
+              [
+                attribute.type_("button"),
+                attribute.class("dropdown-item-btn"),
+                event.on_click(UserToggledCartMenu),
+              ],
+              [element.text("Modo oscuro")],
+            ),
+          ])
+      },
+      html.div([attribute.class("frigleam-banner-pill")], [
+        html.h1([attribute.class("frigleam-title")], [element.text("Frigleam")]),
+        html.div([attribute.class("frigleam-underline")], []),
       ]),
     ]),
-    case model.items {
-      [] ->
-        html.div([attribute.class("empty-list-hint")], [
-          element.text(
-            "Tu lista está vacía. Añade productos o escanea una foto con 📷",
+
+    // Add item form
+    html.form([attribute.class("add-item-form"), event.on_submit(UserAddedItem)], [
+      html.div([attribute.class("input-actions-row")], [
+        html.div([attribute.class("input-pill-wrapper")], [
+          html.input([
+            attribute.name("input_form"),
+            attribute.id("product-input"),
+            attribute.placeholder("Leche, ajos..."),
+            attribute.required(True),
+            attribute.class("input-product"),
+            attribute.autocomplete("off"),
+          ]),
+          html.button(
+            [
+              attribute.type_("button"),
+              attribute.id("voice-input-btn"),
+              attribute.class("btn-mic-inside"),
+              attribute.title("Dictar por voz"),
+              attribute.attribute("aria-label", "Dictar por voz"),
+            ],
+            [],
           ),
+        ]),
+        html.label(
+          [
+            attribute.class("btn-cam-outside"),
+            attribute.attribute("for", "scan-input"),
+            attribute.title("Escanear lista en papel"),
+            attribute.attribute("aria-label", "Escanear lista en papel"),
+          ],
+          [],
+        ),
+        html.input([
+          attribute.type_("file"),
+          attribute.id("scan-input"),
+          attribute.attribute("accept", "image/*"),
+          attribute.attribute("capture", "environment"),
+          attribute.attribute("hidden", ""),
+          event.on("change", decode.map(decode.dynamic, UserSelectedImage)),
+        ]),
+      ]),
+      html.button(
+        [
+          attribute.type_("submit"),
+          attribute.class("btn-aceptar-pill"),
+        ],
+        [element.text("Aceptar")],
+      ),
+    ]),
+
+    // OCR feedback
+    case model.scanning {
+      True ->
+        html.div([attribute.class("scanning-status-pill")], [
+          element.text("📷 Escaneando imagen con OCR..."),
         ])
-      _ -> html.div([attribute.class("categories-container")], all_sections)
+      False -> element.none()
     },
+    case model.ocr_error {
+      None -> element.none()
+      Some(error) ->
+        html.div(
+          [attribute.class("ocr-error-pill"), attribute.attribute("role", "alert")],
+          [element.text("No se pudo escanear: " <> error)],
+        )
+    },
+
+    // Category Tabs
+    html.nav([attribute.class("tabs-nav-bar")], all_tabs),
+
+    // List surface
+    html.div([attribute.class("list-card-surface")], [
+      html.div([attribute.class("list-top-meta-row")], [
+        html.span([attribute.class("list-counter-badge")], [
+          element.text(counter_str),
+        ]),
+        html.button(
+          [
+            attribute.type_("button"),
+            attribute.class("btn-vaciar-outline"),
+            event.on_click(UserAskedToDeleteList),
+            attribute.title("Vaciar toda la lista"),
+          ],
+          [element.text("Vaciar")],
+        ),
+      ]),
+
+      html.div([attribute.class("list-columns-header")], [
+        html.span([attribute.class("col-product-name")], [element.text("Producto")]),
+        html.span([attribute.class("col-product-qty")], [element.text("Cantidad")]),
+      ]),
+
+      case displayed_items {
+        [] ->
+          html.div([attribute.class("empty-list-notice")], [
+            element.text(case model.items {
+              [] -> "Tu lista está vacía. Añade productos o escanea una foto con 📷"
+              _ -> "No hay productos en esta categoría."
+            }),
+          ])
+        _ ->
+          html.ul(
+            [attribute.class("grocery-items-list")],
+            list.map(displayed_items, fn(item) { view_item(model, item) }),
+          )
+      },
+    ]),
+
     view_share_modal(model, share_url),
     view_switch_modal(model),
     view_delete_modal(model),

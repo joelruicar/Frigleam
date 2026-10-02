@@ -1,6 +1,7 @@
 let active_ws = null;
 let reconnect_timer = null;
 let current_room_id = "";
+let current_access_token = "";
 let remote_sync_callback = null;
 let status_change_callback = null;
 
@@ -15,6 +16,33 @@ export function random_room_id() {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return result;
+}
+
+function random_access_token() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function get_access_token(room_id) {
+  const clean_room_id = sanitize_room_id(room_id);
+  const params = new URLSearchParams(window.location.search);
+  const query_room_id = sanitize_room_id(params.get("list") ?? "");
+  const from_query = query_room_id === clean_room_id
+    ? params.get("access")?.trim() ?? ""
+    : "";
+  const storage_key = `frigo_access_${clean_room_id}`;
+  const stored = localStorage.getItem(storage_key)?.trim() ?? "";
+  const token = from_query || stored || random_access_token();
+
+  localStorage.setItem(storage_key, token);
+  if (params.get("access") !== token) {
+    params.set("access", token);
+    const url = new URL(window.location.href);
+    url.search = params.toString();
+    window.history.replaceState({}, "", url.toString());
+  }
+  return token;
 }
 
 export function get_active_room_id() {
@@ -35,12 +63,15 @@ export function get_active_room_id() {
   return new_id;
 }
 
-export function set_active_room_id(room_id) {
+export function set_active_room_id(room_id, access_token) {
   const clean = sanitize_room_id(room_id);
   if (!clean) return;
+  const token = access_token || get_access_token(clean);
   localStorage.setItem("frigo_active_room", clean);
+  localStorage.setItem(`frigo_access_${clean}`, token);
   const url = new URL(window.location.href);
   url.searchParams.set("list", clean);
+  url.searchParams.set("access", token);
   window.history.pushState({}, "", url.toString());
 }
 
@@ -61,7 +92,7 @@ function connect_socket() {
   const base_url = get_base_url();
   const protocol = base_url.startsWith("https") ? "wss:" : "ws:";
   const host = base_url.replace(/^https?:\/\//, "");
-  const url = `${protocol}//${host}/api/room/${encodeURIComponent(current_room_id)}/websocket`;
+  const url = `${protocol}//${host}/api/room/${encodeURIComponent(current_room_id)}/websocket?access=${encodeURIComponent(current_access_token)}`;
   try {
     const socket = new WebSocket(url);
     active_ws = socket;
@@ -77,12 +108,13 @@ function connect_socket() {
   } catch (error) { console.error("Error conectando WebSocket:", error); schedule_reconnect(); }
 }
 
-export function start_sync(room_id, on_remote_sync, on_status_change) {
+export function start_sync(room_id, access_token, on_remote_sync, on_status_change) {
   current_room_id = room_id;
+  current_access_token = access_token;
   remote_sync_callback = on_remote_sync;
   status_change_callback = on_status_change;
   connect_socket();
-  fetch(`${get_base_url()}/api/room/${encodeURIComponent(room_id)}`)
+  fetch(`${get_base_url()}/api/room/${encodeURIComponent(room_id)}?access=${encodeURIComponent(access_token)}`)
     .then((response) => response.ok ? response.json() : null)
     .then((data) => {
       if (room_id === current_room_id && Array.isArray(data?.items)) remote_sync_callback?.(data.items);
@@ -95,8 +127,26 @@ export function broadcast_items_json(json) {
     const items = JSON.parse(json);
     const payload = JSON.stringify({ type: "set_items", items });
     if (active_ws?.readyState === WebSocket.OPEN) { active_ws.send(payload); return; }
-    fetch(`${get_base_url()}/api/room/${encodeURIComponent(current_room_id)}`, {
+    fetch(`${get_base_url()}/api/room/${encodeURIComponent(current_room_id)}?access=${encodeURIComponent(current_access_token)}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }),
     }).catch(() => {});
   } catch (error) { console.error("No se pudieron emitir los artículos:", error); }
+}
+
+export function broadcast_delta_json(json) {
+  try {
+    const delta = JSON.parse(json);
+    const payload = JSON.stringify({ type: "delta", delta });
+    if (active_ws?.readyState === WebSocket.OPEN) {
+      active_ws.send(payload);
+      return;
+    }
+    fetch(`${get_base_url()}/api/room/${encodeURIComponent(current_room_id)}?access=${encodeURIComponent(current_access_token)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ delta }),
+    }).catch(() => {});
+  } catch (error) {
+    console.error("No se pudo emitir el cambio:", error);
+  }
 }

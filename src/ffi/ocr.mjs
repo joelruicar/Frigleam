@@ -2,6 +2,12 @@ import { get_base_url } from "./sync.mjs";
 
 let turnstile_resolve = null;
 let turnstile_reject = null;
+let turnstile_ready = null;
+
+function set_turnstile_visibility(visible) {
+  const container = document.getElementById("turnstile-widget");
+  if (container) container.classList.toggle("turnstile-visible", visible);
+}
 
 export function get_file_from_input(event) {
   const input = event.target;
@@ -57,7 +63,11 @@ async function scan_image_remote(file) {
   form_data.append("file", await canvas_to_blob(source, "image/jpeg", 0.82), "ocr.jpg");
   const token = await get_turnstile_token();
   if (token) form_data.append("turnstile_token", token);
-  const response = await fetch(endpoint, { method: "POST", body: form_data });
+  const response = await fetch(endpoint, {
+    method: "POST",
+    body: form_data,
+    credentials: "include",
+  });
   if (!response.ok) throw new Error(`OCR falló con estado ${response.status}`);
   if ((response.headers.get("content-type") || "").includes("application/json")) {
     const data = await response.json();
@@ -67,9 +77,19 @@ async function scan_image_remote(file) {
 }
 
 async function get_turnstile_token() {
+  const is_local = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
   const site_key = window.FRIGO_TURNSTILE_SITE_KEY?.trim() ?? "";
-  if (!site_key) return "";
-  if (!window.turnstile) throw new Error("Turnstile no está disponible");
+  if (!site_key) {
+    if (is_local) return "";
+    throw new Error("Falta configurar FRIGO_TURNSTILE_SITE_KEY");
+  }
+
+  try {
+    await wait_for_turnstile();
+  } catch (err) {
+    if (is_local) return "";
+    throw err;
+  }
 
   const container = document.getElementById("turnstile-widget");
   if (!container) throw new Error("Falta el widget de Turnstile");
@@ -77,14 +97,25 @@ async function get_turnstile_token() {
   if (window.frigo_turnstile_widget === undefined) {
     window.frigo_turnstile_widget = window.turnstile.render(container, {
       sitekey: site_key,
-      size: "invisible",
-      callback: (token) => turnstile_resolve?.(token),
-      "error-callback": () => turnstile_reject?.(new Error("Turnstile rechazó la petición")),
-      "expired-callback": () => turnstile_reject?.(new Error("El token de Turnstile expiró")),
+      size: "normal",
+      appearance: "execute",
+      callback: (token) => {
+        set_turnstile_visibility(false);
+        turnstile_resolve?.(token);
+      },
+      "error-callback": () => {
+        set_turnstile_visibility(false);
+        turnstile_reject?.(new Error("Turnstile rechazó la petición"));
+      },
+      "expired-callback": () => {
+        set_turnstile_visibility(false);
+        turnstile_reject?.(new Error("El token de Turnstile expiró"));
+      },
     });
   }
 
   return await new Promise((resolve, reject) => {
+    set_turnstile_visibility(true);
     turnstile_resolve = resolve;
     turnstile_reject = reject;
     window.turnstile.reset(window.frigo_turnstile_widget);
@@ -92,7 +123,28 @@ async function get_turnstile_token() {
   });
 }
 
-export async function scan_image(file, dispatch) {
+function wait_for_turnstile() {
+  if (window.turnstile) return Promise.resolve();
+  if (turnstile_ready) return turnstile_ready;
+
+  turnstile_ready = new Promise((resolve, reject) => {
+    const deadline = Date.now() + 10000;
+    const check = () => {
+      if (window.turnstile) {
+        resolve();
+      } else if (Date.now() >= deadline) {
+        reject(new Error("Turnstile no se pudo cargar"));
+      } else {
+        setTimeout(check, 100);
+      }
+    };
+    check();
+  });
+
+  return turnstile_ready;
+}
+
+export async function scan_image(file, dispatch, dispatch_error) {
   try {
     const text = await scan_image_remote(file);
     if (text) { dispatch(text); return; }
@@ -113,5 +165,5 @@ export async function scan_image(file, dispatch) {
       console.error("Error en fallback Tesseract:", error);
     }
   }
-  dispatch("");
+  dispatch_error("No se pudo leer la imagen. Comprueba la conexión e inténtalo de nuevo.");
 }

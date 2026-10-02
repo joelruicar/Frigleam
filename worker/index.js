@@ -6,6 +6,7 @@ const ALLOWED_ORIGINS = new Set([
   "https://frigo.frigleam.workers.dev",
   "http://localhost:8787",
 ]);
+const OCR_SESSION_TTL_SECONDS = 24 * 60 * 60;
 
 function cors_headers(request) {
   const origin = request.headers.get("Origin");
@@ -24,11 +25,70 @@ function json_response(request, body, status = 200, extra_headers = {}) {
   return new Response(JSON.stringify(body), { status, headers });
 }
 
+function get_cookie(request, name) {
+  const cookies = request.headers.get("Cookie") || "";
+  const match = cookies.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function encode_base64url(bytes) {
+  let binary = "";
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function sign_ocr_session(expires_at, env) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(env.TURNSTILE_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(String(expires_at)),
+  );
+  return `${expires_at}.${encode_base64url(signature)}`;
+}
+
+async function has_valid_ocr_session(request, env) {
+  const value = get_cookie(request, "frigo_ocr_session");
+  const [expires_at, signature] = value.split(".");
+  if (!expires_at || !signature || Number(expires_at) <= Math.floor(Date.now() / 1000)) {
+    return false;
+  }
+  const expected = await sign_ocr_session(Number(expires_at), env);
+  return expected === value;
+}
+
+async function ocr_session_cookie(env) {
+  const expires_at = Math.floor(Date.now() / 1000) + OCR_SESSION_TTL_SECONDS;
+  const value = await sign_ocr_session(expires_at, env);
+  return `frigo_ocr_session=${encodeURIComponent(value)}; Max-Age=${OCR_SESSION_TTL_SECONDS}; Path=/api/ocr; HttpOnly; Secure; SameSite=Lax`;
+}
+
 function is_valid_image_bytes(bytes, type) {
   if (!ALLOWED_IMAGE_TYPES.has(type)) return false;
   if (type === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
   if (type === "image/png") return bytes.slice(0, 8).every((value, index) => value === [137, 80, 78, 71, 13, 10, 26, 10][index]);
   return String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+}
+
+function apply_delta(items, delta) {
+  if (!delta || typeof delta.type !== "string") return null;
+  if (delta.type === "item_deleted" && typeof delta.id === "string") {
+    return items.filter((item) => item.id !== delta.id);
+  }
+  if ((delta.type === "item_added" || delta.type === "item_updated") && delta.item) {
+    const item = delta.item;
+    if (typeof item.id !== "string" || typeof item.name !== "string") return null;
+    const without_item = items.filter((existing) => existing.id !== item.id);
+    return delta.type === "item_added" ? [...without_item, item] : [...without_item, item];
+  }
+  if (delta.type === "list_cleared") return [];
+  return null;
 }
 
 async function verify_turnstile(request, token, env) {
@@ -60,6 +120,17 @@ export class ShoppingListRoom extends DurableObject {
 
   async fetch(request) {
     const url = new URL(request.url);
+    const access_token = url.searchParams.get("access") || "";
+    const stored_access_token = await this.ctx.storage.get("access_token");
+
+    if (!stored_access_token) {
+      if (!access_token || access_token.length < 32) {
+        return new Response("Room access token required", { status: 401 });
+      }
+      await this.ctx.storage.put("access_token", access_token);
+    } else if (access_token !== stored_access_token) {
+      return new Response("Invalid room access token", { status: 403 });
+    }
 
     // WebSocket upgrade
     if (request.headers.get("Upgrade") === "websocket") {
@@ -70,7 +141,15 @@ export class ShoppingListRoom extends DurableObject {
       this.ctx.acceptWebSocket(server);
 
       // Load stored items from SQLite storage
-      const items = (await this.ctx.storage.get("items")) || [];
+      let items = await this.ctx.storage.get("items");
+      if (items === undefined) {
+        items = [
+          { id: "1", name: "Leche de avena", number: 1, checked: false, category: "🥛 Lácteos y huevos" },
+          { id: "2", name: "Zanahorias", number: 1, checked: false, category: "🥬 Frutas y verduras" },
+          { id: "3", name: "Leche", number: 1, checked: true, category: "🥛 Lácteos y huevos" },
+        ];
+        await this.ctx.storage.put("items", items);
+      }
 
       // Send initial state to the newly connected client
       server.send(JSON.stringify({ type: "sync", items }));
@@ -80,7 +159,15 @@ export class ShoppingListRoom extends DurableObject {
 
     // HTTP GET: retrieve list state
     if (request.method === "GET") {
-      const items = (await this.ctx.storage.get("items")) || [];
+      let items = await this.ctx.storage.get("items");
+      if (items === undefined) {
+        items = [
+          { id: "1", name: "Leche de avena", number: 1, checked: false, category: "🥛 Lácteos y huevos" },
+          { id: "2", name: "Zanahorias", number: 1, checked: false, category: "🥬 Frutas y verduras" },
+          { id: "3", name: "Leche", number: 1, checked: true, category: "🥛 Lácteos y huevos" },
+        ];
+        await this.ctx.storage.put("items", items);
+      }
       return Response.json(
         { items },
         {
@@ -97,6 +184,14 @@ export class ShoppingListRoom extends DurableObject {
     if (request.method === "POST") {
       try {
         const body = await request.json();
+        if (body.delta) {
+          const current = (await this.ctx.storage.get("items")) || [];
+          const updated = apply_delta(current, body.delta);
+          if (!updated) return Response.json({ error: "Invalid delta" }, { status: 400 });
+          await this.ctx.storage.put("items", updated);
+          this.broadcast(JSON.stringify({ type: "sync", items: updated }));
+          return Response.json({ success: true, count: updated.length });
+        }
         if (Array.isArray(body.items)) {
           await this.ctx.storage.put("items", body.items);
           this.broadcast(JSON.stringify({ type: "sync", items: body.items }));
@@ -140,6 +235,12 @@ export class ShoppingListRoom extends DurableObject {
 
         // Broadcast to all other connected clients in this room
         this.broadcast(JSON.stringify({ type: "sync", items: data.items }), ws);
+      } else if (data.type === "delta") {
+        const current = (await this.ctx.storage.get("items")) || [];
+        const updated = apply_delta(current, data.delta);
+        if (!updated) return;
+        await this.ctx.storage.put("items", updated);
+        this.broadcast(JSON.stringify({ type: "sync", items: updated }), ws);
       } else if (data.type === "ping") {
         ws.send(JSON.stringify({ type: "pong" }));
       }
@@ -201,26 +302,6 @@ Rules:
     const errStr = String(err.message || err);
     errors.push(`Llama 3.2: ${errStr}`);
 
-    // If Meta license agreement is required, agree and retry
-    if (
-      errStr.toLowerCase().includes("agree") ||
-      errStr.toLowerCase().includes("license") ||
-      errStr.toLowerCase().includes("terms")
-    ) {
-      try {
-        await env.AI.run("@cf/meta/llama-3.2-11b-vision-instruct", { prompt: "agree" });
-        const resRetry = await env.AI.run("@cf/meta/llama-3.2-11b-vision-instruct", {
-          prompt,
-          image: byteList,
-          max_tokens: 512,
-        });
-        if (resRetry && resRetry.response && resRetry.response.trim() !== "") {
-          return resRetry.response.trim();
-        }
-      } catch (retryErr) {
-        errors.push(`Llama 3.2 retry: ${retryErr.message || String(retryErr)}`);
-      }
-    }
   }
 
   // 2. Try LLaVA 1.5 7B HF (open vision model, no license agreement needed)
@@ -236,20 +317,6 @@ Rules:
     }
   } catch (err2) {
     errors.push(`LLaVA 1.5: ${err2.message || String(err2)}`);
-  }
-
-  // 3. Fallback to uform-gen2-qwen-500m
-  try {
-    const res = await env.AI.run("@cf/unum/uform-gen2-qwen-500m", {
-      prompt,
-      image: byteList,
-    });
-    if (res && (res.description || res.response)) {
-      const text = (res.description || res.response).trim();
-      if (text !== "") return text;
-    }
-  } catch (err3) {
-    errors.push(`UForm: ${err3.message || String(err3)}`);
   }
 
   throw new Error(`Workers AI falló: ${errors.join(" | ")}`);
@@ -290,12 +357,16 @@ export default {
       }
 
       try {
-        if (!env.OCR_RATE_LIMITER || !env.TURNSTILE_SECRET) {
+        const is_local_request = new URL(request.url).hostname === "localhost" ||
+          new URL(request.url).hostname === "127.0.0.1";
+        if (!is_local_request && (!env.OCR_RATE_LIMITER || !env.TURNSTILE_SECRET)) {
           return json_response(request, { error: "OCR no está configurado de forma segura" }, 503);
         }
 
         const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-        const rate = await env.OCR_RATE_LIMITER.limit({ key: ip });
+        const rate = is_local_request
+          ? { success: true }
+          : await env.OCR_RATE_LIMITER.limit({ key: ip });
         if (!rate.success) {
           return json_response(request, { error: "Demasiadas peticiones OCR" }, 429, {
             "Retry-After": "60",
@@ -332,7 +403,8 @@ export default {
         if (!is_valid_image_bytes(bytes, imageType)) {
           return json_response(request, { error: "Tipo de imagen no permitido" }, 415);
         }
-        if (!(await verify_turnstile(request, turnstileToken, env))) {
+        const has_session = is_local_request || await has_valid_ocr_session(request, env);
+        if (!has_session && !is_local_request && !(await verify_turnstile(request, turnstileToken, env))) {
           return json_response(request, { error: "Verificación Turnstile inválida" }, 403);
         }
         if (!env.AI) {
@@ -340,7 +412,10 @@ export default {
         }
 
         const text = await runVisionOcr(env, imageBuffer);
-        return json_response(request, { text });
+        const headers = has_session
+          ? {}
+          : { "Set-Cookie": await ocr_session_cookie(env) };
+        return json_response(request, { text }, 200, headers);
       } catch (err) {
         console.error("Error en /api/ocr:", err);
         return json_response(request, { error: err.message || "Error procesando OCR" }, 500);
