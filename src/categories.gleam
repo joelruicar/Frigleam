@@ -21,6 +21,72 @@ pub const standard_categories = [
   "📦 Otros",
 ]
 
+pub fn category_icon(category: String) -> String {
+  case category {
+    "🌱 Veggie" -> "🌱"
+    "🥬 Frutas y verduras" -> "🥬"
+    "🥩 Carne y pescado" -> "🥩"
+    "🥛 Lácteos y huevos" -> "🥛"
+    "🥖 Panadería" -> "🥖"
+    "🥫 Despensa" -> "🥫"
+    "🍫 Dulces y snacks" -> "🍫"
+    "🥤 Bebidas" -> "🥤"
+    "🧊 Congelados" -> "🧊"
+    "🧼 Limpieza" -> "🧼"
+    "🧴 Cuidado personal" -> "🧴"
+    "👶 Bebé" -> "👶"
+    "🐾 Mascotas" -> "🐾"
+    "💊 Farmacia y salud" -> "💊"
+    "🏠 Hogar y bazar" -> "🏠"
+    "📦 Otros" -> "📦"
+    _ -> "🛒"
+  }
+}
+
+pub fn category_short_name(category: String) -> String {
+  case category {
+    "🌱 Veggie" -> "Veggie"
+    "🥬 Frutas y verduras" -> "Verdura"
+    "🥩 Carne y pescado" -> "Carne"
+    "🥛 Lácteos y huevos" -> "Lacteos"
+    "🥖 Panadería" -> "Panadería"
+    "🥫 Despensa" -> "Despensa"
+    "🍫 Dulces y snacks" -> "Snacks"
+    "🥤 Bebidas" -> "Bebidas"
+    "🧊 Congelados" -> "Congelados"
+    "🧼 Limpieza" -> "Limpieza"
+    "🧴 Cuidado personal" -> "Higiene"
+    "👶 Bebé" -> "Bebé"
+    "🐾 Mascotas" -> "Mascotas"
+    "💊 Farmacia y salud" -> "Farmacia"
+    "🏠 Hogar y bazar" -> "Hogar"
+    "📦 Otros" -> "Otros"
+    other -> other
+  }
+}
+
+pub fn category_slug(category: String) -> String {
+  case category {
+    "🌱 Veggie" -> "veggie"
+    "🥬 Frutas y verduras" -> "verdura"
+    "🥩 Carne y pescado" -> "carne"
+    "🥛 Lácteos y huevos" -> "lacteos"
+    "🥖 Panadería" -> "panaderia"
+    "🥫 Despensa" -> "despensa"
+    "🍫 Dulces y snacks" -> "snacks"
+    "🥤 Bebidas" -> "bebidas"
+    "🧊 Congelados" -> "congelados"
+    "🧼 Limpieza" -> "limpieza"
+    "🧴 Cuidado personal" -> "higiene"
+    "👶 Bebé" -> "bebe"
+    "🐾 Mascotas" -> "mascotas"
+    "💊 Farmacia y salud" -> "farmacia"
+    "🏠 Hogar y bazar" -> "hogar"
+    "📦 Otros" -> "otros"
+    _ -> "otros"
+  }
+}
+
 pub fn infer_category(name: String) -> String {
   let lower = string.lowercase(name)
 

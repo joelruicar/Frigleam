@@ -36,8 +36,15 @@ export function render_qr_code(element_id, text) {
   setTimeout(() => {
     const container = document.getElementById(element_id);
     if (!container) return;
-    QRCode.toString(text, { type: "svg", margin: 1, width: 190, color: { dark: "#292D3E", light: "#FAF7F0" } })
-      .then((svg) => { container.innerHTML = svg; })
+    QRCode.toString(text, {
+      type: "svg",
+      margin: 0,
+      width: 190,
+      color: { dark: "#2e2520", light: "#00000000" },
+    })
+      .then((svg) => {
+        container.innerHTML = svg;
+      })
       .catch((error) => console.error("Error al generar código QR:", error));
   }, 50);
 }

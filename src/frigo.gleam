@@ -21,8 +21,8 @@ import model.{
   UserClosedShareModal, UserClosedSwitchModal, UserConfirmedDeleteList,
   UserConfirmedEdit, UserConfirmedSwitchRoom, UserDeletedItem,
   UserGenerateRandomRoom, UserOpenedShareModal, UserOpenedSwitchModal,
-  UserScanFailed, UserScannedText, UserSelectedImage, UserToggledItem,
-  UserToggledSection,
+  UserScanFailed, UserScannedText, UserSelectedImage, UserSelectedTab,
+  UserToggledCartMenu, UserToggledItem, UserToggledSection,
 }
 import varasto
 import view as app_view
@@ -353,6 +353,12 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
         }
       }
 
+    // --- Category Tabs ------------------------------------------------------
+    UserSelectedTab(tab) -> #(
+      Model(..model, selected_tab: tab),
+      effect.none(),
+    )
+
     // --- Sections ------------------------------------------------------------
     UserToggledSection(cat) -> {
       let is_collapsed = list.contains(model.collapsed_sections, cat)
@@ -432,11 +438,17 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
       effect.none(),
     )
 
+    // --- Cart Menu -----------------------------------------------------------
+    UserToggledCartMenu -> #(
+      Model(..model, show_cart_menu: !model.show_cart_menu),
+      effect.none(),
+    )
+
     // --- Share modal ---------------------------------------------------------
     UserOpenedShareModal -> {
       let link = get_share_link(model.room_id)
       #(
-        Model(..model, show_share_modal: True),
+        Model(..model, show_share_modal: True, show_cart_menu: False),
         effect.from(fn(_) { render_qr_code("share-qr-code", link) }),
       )
     }
@@ -461,7 +473,12 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
 
     // --- Room switching ------------------------------------------------------
     UserOpenedSwitchModal -> #(
-      Model(..model, show_switch_modal: True, switch_room_input: model.room_id),
+      Model(
+        ..model,
+        show_switch_modal: True,
+        show_cart_menu: False,
+        switch_room_input: model.room_id,
+      ),
       effect.none(),
     )
 
@@ -510,11 +527,38 @@ fn init(_initial: Int) -> #(Model, effect.Effect(Message)) {
   let assert Ok(local) = varasto.local()
   let storage = varasto.new(local, reader(), writer)
   let room = get_active_room_id()
+  let loaded_items = load_room_items(storage, room)
+  let initial_items = case loaded_items {
+    [] -> [
+      Item(
+        id: "1",
+        name: "Leche de avena",
+        amount: 1,
+        checked: False,
+        category: "🥛 Lácteos y huevos",
+      ),
+      Item(
+        id: "2",
+        name: "Zanahorias",
+        amount: 1,
+        checked: False,
+        category: "🥬 Frutas y verduras",
+      ),
+      Item(
+        id: "3",
+        name: "Leche",
+        amount: 1,
+        checked: True,
+        category: "🥛 Lácteos y huevos",
+      ),
+    ]
+    other -> other
+  }
 
   #(
     Model(
       items_storage: storage,
-      items: load_room_items(storage, room),
+      items: initial_items,
       scanning: False,
       editing: None,
       confirm_delete_list: False,
@@ -522,6 +566,7 @@ fn init(_initial: Int) -> #(Model, effect.Effect(Message)) {
       draft_amount: "",
       draft_category: "📦 Otros",
       collapsed_sections: [],
+      selected_tab: "Todo",
       room_id: room,
       connection_status: Connecting,
       ocr_error: None,
@@ -529,6 +574,7 @@ fn init(_initial: Int) -> #(Model, effect.Effect(Message)) {
       show_switch_modal: False,
       switch_room_input: "",
       copied_toast: False,
+      show_cart_menu: False,
     ),
     effect.batch([
       effect.from(fn(dispatch) {

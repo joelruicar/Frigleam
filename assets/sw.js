@@ -1,4 +1,4 @@
-const CACHE_NAME = "frigo-assets-v1";
+const CACHE_NAME = "frigo-assets-v2";
 const APP_SHELL = ["/", "/index.html", "/styles.css", "/frigo.js", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
