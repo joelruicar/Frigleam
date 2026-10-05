@@ -17,7 +17,19 @@
 
 * {
   box-sizing: border-box;
+  font-family: 'Jersey25', sans-serif;
 }
+
+@font-face {
+  font-family: 'Jersey25'; 
+  src: url('/Jersey25-Regular.ttf') format('truetype'); 
+  font-display: swap;
+}
+
+body {
+  font-family: 'Jersey25', sans-serif; 
+}
+
 
 /* ==========================================================================
    Turnstile Widget (Cloudflare Security)
@@ -57,7 +69,6 @@ body {
   background: #e6dfce;
   display: flex;
   justify-content: center;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-tap-highlight-color: transparent;
   color: var(--text-dark);
 }
@@ -89,7 +100,7 @@ body {
   background-size: 100% 480px;
   opacity: 0.95;
   z-index: 0;
-  background-image: url("background.png");
+  background-image: url("/background.png");
 }
 
 /* ==========================================================================
@@ -139,7 +150,7 @@ body {
 .cart-badge-ring {
   position: absolute;
   left: 18px;
-  top: 18px;
+  top: 30px;
   width: 66px;
   height: 66px;
   border-radius: 50%;
@@ -259,7 +270,7 @@ body {
 .input-product {
   flex: 1;
   min-width: 0;
-  height: 100%;
+  height: 80%;
   border: none;
   outline: none;
   background: transparent;
@@ -361,8 +372,8 @@ body {
 }
 
 .scanning-status-pill {
-  background: #e3f2fd;
-  color: #1976d2;
+  background: #8ed0ff;
+  color: #ffffff;
   border: 1px solid #bbdefb;
 }
 
@@ -401,7 +412,8 @@ body {
   white-space: nowrap;
   position: relative;
   bottom: -1px;
-  transition: all 0.15s ease;
+  transform: translateY(5px);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
   user-select: none;
 }
 
@@ -410,7 +422,7 @@ body {
 }
 
 .tab-btn.tab-todo {
-  background: #faf8f0;
+  background: #e2ce6b;
   color: #111111;
   font-weight: 800;
 }
@@ -501,6 +513,8 @@ body {
   color: #111111 !important;
   font-weight: 800;
   z-index: 3;
+  transform: translateY(-3px);
+  box-shadow: 0 -3px 8px rgba(70, 50, 35, 0.12);
 }
 
 .tab-btn.tab-icon-only {
@@ -774,12 +788,14 @@ body {
 }
 
 .edit-name {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 4ch;
 }
 
 .edit-amount {
-  width: 52px;
+  width: 42px;
+  min-width: 4ch;
   text-align: center;
 }
 
@@ -792,6 +808,11 @@ body {
   background: #fff;
   color: var(--text-dark);
   padding: 0 8px;
+  flex: 0 1 120px;
+  width: 120px;
+  min-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
   outline: none;
 }
@@ -964,7 +985,6 @@ body {
   transform: scale(0.95);
 }
 
-.switch-modal-sheet,
 .delete-modal-sheet {
   background: #faf4e6;
   border-radius: 36px;
@@ -976,6 +996,308 @@ body {
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(220, 205, 185, 0.7);
   animation: sheet-pop 0.2s ease-out;
+}
+
+.switch-modal-sheet {
+  background: #faf4e6;
+  border-radius: 36px;
+  padding: 1.5rem 1.25rem 1.25rem;
+  width: min(100%, 360px);
+  max-height: 85vh;
+  max-height: 85dvh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(220, 205, 185, 0.7);
+  animation: sheet-pop 0.2s ease-out;
+  box-sizing: border-box;
+}
+
+.switch-modal-sheet::-webkit-scrollbar {
+  width: 5px;
+}
+
+.switch-modal-sheet::-webkit-scrollbar-thumb {
+  background: rgba(180, 160, 140, 0.4);
+  border-radius: 4px;
+}
+
+.current-room-card {
+  background: #f0e5d0;
+  border-radius: 18px;
+  padding: 10px 14px;
+  margin: 8px 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid rgba(180, 160, 140, 0.35);
+}
+
+.current-room-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.current-room-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.current-room-name {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-save-current {
+  background: var(--accent-peach);
+  border: 1.5px solid var(--accent-peach-border);
+  color: #7a3a14;
+  border-radius: 14px;
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.1s ease;
+  flex-shrink: 0;
+}
+
+.btn-save-current:active {
+  transform: scale(0.95);
+}
+
+.badge-already-saved {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4b7a3a;
+  background: #ddead1;
+  padding: 4px 8px;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+
+.sheet-section {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 14px;
+}
+
+.sheet-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  padding: 0 4px;
+}
+
+.sheet-section-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text-dark);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sheet-section-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.sheet-empty-hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px 10px;
+  background: rgba(235, 220, 200, 0.4);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.sheet-list-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sheet-list-item {
+  background: #f7efe1;
+  border: 1.5px solid rgba(210, 195, 175, 0.6);
+  border-radius: 16px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  transition: background 0.15s ease;
+}
+
+.sheet-list-item.is-active {
+  border-color: var(--accent-peach);
+  background: #fdf6ec;
+}
+
+.sheet-item-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+}
+
+.sheet-item-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sheet-item-code {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-current-tag {
+  background: #e8dbb8;
+  color: #6d5b3d;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 8px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.sheet-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.btn-open-list {
+  background: var(--accent-peach);
+  border: 1.5px solid var(--accent-peach-border);
+  color: #7a3a14;
+  border-radius: 12px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.btn-open-list:active {
+  transform: scale(0.95);
+}
+
+.btn-mini-icon {
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.btn-mini-icon:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.btn-mini-icon:active {
+  transform: scale(0.9);
+}
+
+.btn-save-mini {
+  background: #e4ddc8;
+  border: 1px solid rgba(160, 140, 120, 0.4);
+  color: var(--text-dark);
+  border-radius: 12px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  transition: transform 0.1s ease;
+}
+
+.btn-save-mini:active {
+  transform: scale(0.95);
+}
+
+.sheet-edit-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.sheet-edit-input {
+  flex: 1;
+  height: 32px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1.5px solid var(--accent-peach);
+  padding: 0 10px;
+  font-size: 14px;
+  color: var(--text-dark);
+  font-weight: 700;
+  outline: none;
+  min-width: 0;
+}
+
+.btn-confirm-edit {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: #a9dba0;
+  color: #27521e;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.btn-cancel-edit {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: #fcd4c8;
+  color: #8a2b16;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .sheet-title {
@@ -1019,6 +1341,7 @@ body {
   align-items: center;
   margin-top: 8px;
 }
+
 
 .btn-random-pill {
   width: 100%;

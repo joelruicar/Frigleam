@@ -141,15 +141,7 @@ export class ShoppingListRoom extends DurableObject {
       this.ctx.acceptWebSocket(server);
 
       // Load stored items from SQLite storage
-      let items = await this.ctx.storage.get("items");
-      if (items === undefined) {
-        items = [
-          { id: "1", name: "Leche de avena", number: 1, checked: false, category: "🥛 Lácteos y huevos" },
-          { id: "2", name: "Zanahorias", number: 1, checked: false, category: "🥬 Frutas y verduras" },
-          { id: "3", name: "Leche", number: 1, checked: true, category: "🥛 Lácteos y huevos" },
-        ];
-        await this.ctx.storage.put("items", items);
-      }
+      const items = (await this.ctx.storage.get("items")) || [];
 
       // Send initial state to the newly connected client
       server.send(JSON.stringify({ type: "sync", items }));
@@ -160,14 +152,7 @@ export class ShoppingListRoom extends DurableObject {
     // HTTP GET: retrieve list state
     if (request.method === "GET") {
       let items = await this.ctx.storage.get("items");
-      if (items === undefined) {
-        items = [
-          { id: "1", name: "Leche de avena", number: 1, checked: false, category: "🥛 Lácteos y huevos" },
-          { id: "2", name: "Zanahorias", number: 1, checked: false, category: "🥬 Frutas y verduras" },
-          { id: "3", name: "Leche", number: 1, checked: true, category: "🥛 Lácteos y huevos" },
-        ];
-        await this.ctx.storage.put("items", items);
-      }
+    
       return Response.json(
         { items },
         {

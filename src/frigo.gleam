@@ -15,15 +15,19 @@ import lustre/effect
 import model.{
   type Message, type Model, Connected, Connecting, ConnectionStatusChanged,
   Disconnected, Model, Noop, RemoteItemsReceived, UserAddedItem,
-  UserAskedToDeleteList, UserCancelledDeleteList, UserChangedDraftAmount,
-  UserChangedDraftCategory, UserChangedDraftName, UserChangedSwitchInput,
-  UserClickedCopyLink, UserClickedItem, UserClickedNativeShare,
-  UserClosedShareModal, UserClosedSwitchModal, UserConfirmedDeleteList,
-  UserConfirmedEdit, UserConfirmedSwitchRoom, UserDeletedItem,
+  UserAskedToDeleteList, UserCancelledDeleteList, UserCancelledRenameSavedList,
+  UserChangedDraftAmount, UserChangedDraftCategory, UserChangedDraftName,
+  UserChangedDraftSavedName, UserChangedSwitchInput, UserClickedCopyLink,
+  UserClickedItem, UserClickedNativeShare, UserClosedShareModal,
+  UserClosedSwitchModal, UserConfirmedDeleteList, UserConfirmedEdit,
+  UserConfirmedRenameSavedList, UserConfirmedSwitchRoom, UserDeletedItem,
   UserGenerateRandomRoom, UserOpenedShareModal, UserOpenedSwitchModal,
-  UserScanFailed, UserScannedText, UserSelectedImage, UserSelectedTab,
-  UserToggledCartMenu, UserToggledItem, UserToggledSection,
+  UserRemovedSavedList, UserSavedCurrentList, UserSavedList, UserScanFailed,
+  UserScannedText, UserSelectedImage, UserSelectedRoom, UserSelectedTab,
+  UserStartedRenamingSavedList, UserToggledCartMenu, UserToggledItem,
+  UserToggledSection,
 }
+import saved_lists
 import varasto
 import view as app_view
 
@@ -64,6 +68,9 @@ fn set_active_room_id(room_id: String, access_token: String) -> Nil
 
 @external(javascript, "./frigo_ffi.mjs", "sanitize_room_id")
 fn sanitize_room_id(room_id: String) -> String
+
+@external(javascript, "./frigo_ffi.mjs", "clear_product_input")
+fn clear_product_input() -> Nil
 
 @external(javascript, "./frigo_ffi.mjs", "random_room_id")
 fn random_room_id() -> String
@@ -156,6 +163,45 @@ fn start_sync_effect(room_id: String) -> effect.Effect(Message) {
   })
 }
 
+fn do_switch_to_room(
+  model: Model,
+  target_room: String,
+) -> #(Model, effect.Effect(Message)) {
+  let clean = sanitize_room_id(target_room)
+  case clean {
+    "" -> #(model, effect.none())
+    room -> {
+      let updated_recents = saved_lists.add_recent(model.recent_lists, room)
+      let loaded = load_room_items(model.items_storage, room)
+      #(
+        Model(
+          ..model,
+          room_id: room,
+          items: loaded,
+          recent_lists: updated_recents,
+          show_switch_modal: False,
+          switch_room_input: "",
+          connection_status: Connecting,
+          editing_saved_list: None,
+          draft_saved_name: "",
+        ),
+        effect.batch([
+          effect.from(fn(_) {
+            let _ =
+              varasto.set(
+                model.recent_lists_storage,
+                "frigo_recent_lists",
+                updated_recents,
+              )
+            set_active_room_id(room, get_access_token(room))
+          }),
+          start_sync_effect(room),
+        ]),
+      )
+    }
+  }
+}
+
 // =============================================================================
 // Update Loop
 // =============================================================================
@@ -199,23 +245,31 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
             True -> "item_updated"
             False -> "item_added"
           }
-          save_delta(
-            model,
-            updated,
-            json.object([
-              #("type", json.string(operation)),
-              #(
-                "item",
-                json.object([
-                  #("id", json.string(changed.id)),
-                  #("name", json.string(changed.name)),
-                  #("number", json.int(changed.amount)),
-                  #("checked", json.bool(changed.checked)),
-                  #("category", json.string(changed.category)),
-                ]),
-              ),
-            ])
-              |> json.to_string,
+          let #(updated_model, save_effect) =
+            save_delta(
+              model,
+              updated,
+              json.object([
+                #("type", json.string(operation)),
+                #(
+                  "item",
+                  json.object([
+                    #("id", json.string(changed.id)),
+                    #("name", json.string(changed.name)),
+                    #("number", json.int(changed.amount)),
+                    #("checked", json.bool(changed.checked)),
+                    #("category", json.string(changed.category)),
+                  ]),
+                ),
+              ])
+                |> json.to_string,
+            )
+          #(
+            updated_model,
+            effect.batch([
+              save_effect,
+              effect.from(fn(_) { clear_product_input() }),
+            ]),
           )
         }
       }
@@ -273,7 +327,12 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
     )
 
     UserConfirmedDeleteList -> {
-      let #(m, eff) = save(model, [])
+      let remaining_items = case model.selected_tab {
+        "Todo" -> []
+        category ->
+          list.filter(model.items, fn(item) { item.category != category })
+      }
+      let #(m, eff) = save(model, remaining_items)
       #(Model(..m, confirm_delete_list: False), eff)
     }
 
@@ -354,10 +413,7 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
       }
 
     // --- Category Tabs ------------------------------------------------------
-    UserSelectedTab(tab) -> #(
-      Model(..model, selected_tab: tab),
-      effect.none(),
-    )
+    UserSelectedTab(tab) -> #(Model(..model, selected_tab: tab), effect.none())
 
     // --- Sections ------------------------------------------------------------
     UserToggledSection(cat) -> {
@@ -471,19 +527,26 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
       effect.from(fn(_) { copy_to_clipboard(get_share_link(model.room_id)) }),
     )
 
-    // --- Room switching ------------------------------------------------------
+    // --- Room switching and List Management ----------------------------------
     UserOpenedSwitchModal -> #(
       Model(
         ..model,
         show_switch_modal: True,
         show_cart_menu: False,
-        switch_room_input: model.room_id,
+        switch_room_input: "",
+        editing_saved_list: None,
+        draft_saved_name: "",
       ),
       effect.none(),
     )
 
     UserClosedSwitchModal -> #(
-      Model(..model, show_switch_modal: False),
+      Model(
+        ..model,
+        show_switch_modal: False,
+        editing_saved_list: None,
+        draft_saved_name: "",
+      ),
       effect.none(),
     )
 
@@ -497,25 +560,121 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
       effect.none(),
     )
 
-    UserConfirmedSwitchRoom ->
-      case sanitize_room_id(model.switch_room_input) {
+    UserConfirmedSwitchRoom -> do_switch_to_room(model, model.switch_room_input)
+
+    UserSelectedRoom(room) -> do_switch_to_room(model, room)
+
+    UserSavedCurrentList -> {
+      let room = model.room_id
+      let current_name =
+        saved_lists.find_saved_name(model.saved_lists, room)
+        |> option.unwrap(room)
+      let updated_saved =
+        saved_lists.save_list(model.saved_lists, room, current_name)
+      #(
+        Model(..model, saved_lists: updated_saved),
+        effect.from(fn(_) {
+          let _ =
+            varasto.set(
+              model.saved_lists_storage,
+              "frigo_saved_lists",
+              updated_saved,
+            )
+          Nil
+        }),
+      )
+    }
+
+    UserSavedList(room) -> {
+      let clean = sanitize_room_id(room)
+      case clean {
         "" -> #(model, effect.none())
-        room -> #(
-          Model(
-            ..model,
-            room_id: room,
-            items: load_room_items(model.items_storage, room),
-            show_switch_modal: False,
-            connection_status: Connecting,
-          ),
-          effect.batch([
+        r -> {
+          let updated_saved = saved_lists.save_list(model.saved_lists, r, r)
+          #(
+            Model(..model, saved_lists: updated_saved),
             effect.from(fn(_) {
-              set_active_room_id(room, get_access_token(room))
+              let _ =
+                varasto.set(
+                  model.saved_lists_storage,
+                  "frigo_saved_lists",
+                  updated_saved,
+                )
+              Nil
             }),
-            start_sync_effect(room),
-          ]),
-        )
+          )
+        }
       }
+    }
+
+    UserRemovedSavedList(room) -> {
+      let updated_saved = saved_lists.remove_saved_list(model.saved_lists, room)
+      let new_editing = case model.editing_saved_list {
+        Some(id) if id == room -> None
+        other -> other
+      }
+      #(
+        Model(
+          ..model,
+          saved_lists: updated_saved,
+          editing_saved_list: new_editing,
+        ),
+        effect.from(fn(_) {
+          let _ =
+            varasto.set(
+              model.saved_lists_storage,
+              "frigo_saved_lists",
+              updated_saved,
+            )
+          Nil
+        }),
+      )
+    }
+
+    UserStartedRenamingSavedList(room, current_name) -> #(
+      Model(
+        ..model,
+        editing_saved_list: Some(room),
+        draft_saved_name: current_name,
+      ),
+      effect.none(),
+    )
+
+    UserChangedDraftSavedName(value) -> #(
+      Model(..model, draft_saved_name: value),
+      effect.none(),
+    )
+
+    UserConfirmedRenameSavedList(room) -> {
+      let updated_saved =
+        saved_lists.rename_saved_list(
+          model.saved_lists,
+          room,
+          model.draft_saved_name,
+        )
+      #(
+        Model(
+          ..model,
+          saved_lists: updated_saved,
+          editing_saved_list: None,
+          draft_saved_name: "",
+        ),
+        effect.from(fn(_) {
+          let _ =
+            varasto.set(
+              model.saved_lists_storage,
+              "frigo_saved_lists",
+              updated_saved,
+            )
+          Nil
+        }),
+      )
+    }
+
+    UserCancelledRenameSavedList -> #(
+      Model(..model, editing_saved_list: None, draft_saved_name: ""),
+      effect.none(),
+    )
   }
 }
 
@@ -526,39 +685,37 @@ fn update(model: Model, message: Message) -> #(Model, effect.Effect(Message)) {
 fn init(_initial: Int) -> #(Model, effect.Effect(Message)) {
   let assert Ok(local) = varasto.local()
   let storage = varasto.new(local, reader(), writer)
+  let saved_storage =
+    varasto.new(
+      local,
+      saved_lists.saved_lists_reader(),
+      saved_lists.saved_lists_writer,
+    )
+  let recent_storage =
+    varasto.new(local, saved_lists.recents_reader(), saved_lists.recents_writer)
+
   let room = get_active_room_id()
-  let loaded_items = load_room_items(storage, room)
-  let initial_items = case loaded_items {
-    [] -> [
-      Item(
-        id: "1",
-        name: "Leche de avena",
-        amount: 1,
-        checked: False,
-        category: "🥛 Lácteos y huevos",
-      ),
-      Item(
-        id: "2",
-        name: "Zanahorias",
-        amount: 1,
-        checked: False,
-        category: "🥬 Frutas y verduras",
-      ),
-      Item(
-        id: "3",
-        name: "Leche",
-        amount: 1,
-        checked: True,
-        category: "🥛 Lácteos y huevos",
-      ),
-    ]
-    other -> other
-  }
+
+  let loaded_saved =
+    varasto.get(saved_storage, "frigo_saved_lists")
+    |> result.unwrap([])
+
+  let loaded_recents =
+    varasto.get(recent_storage, "frigo_recent_lists")
+    |> result.unwrap([])
+
+  let initial_recents = saved_lists.add_recent(loaded_recents, room)
 
   #(
     Model(
       items_storage: storage,
-      items: initial_items,
+      items: [],
+      saved_lists_storage: saved_storage,
+      saved_lists: loaded_saved,
+      recent_lists_storage: recent_storage,
+      recent_lists: initial_recents,
+      editing_saved_list: None,
+      draft_saved_name: "",
       scanning: False,
       editing: None,
       confirm_delete_list: False,
@@ -577,6 +734,11 @@ fn init(_initial: Int) -> #(Model, effect.Effect(Message)) {
       show_cart_menu: False,
     ),
     effect.batch([
+      effect.from(fn(_) {
+        let _ =
+          varasto.set(recent_storage, "frigo_recent_lists", initial_recents)
+        Nil
+      }),
       effect.from(fn(dispatch) {
         enable_swipe_to_delete(fn(id) { dispatch(UserDeletedItem(id)) })
       }),
