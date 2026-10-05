@@ -33,7 +33,6 @@ pub type Model {
   )
 }
 
-
 pub type ConnectionStatus {
   Connecting
   Connected
@@ -79,4 +78,3 @@ pub type Message {
   UserCancelledRenameSavedList
   UserSelectedRoom(room_id: String)
 }
-
