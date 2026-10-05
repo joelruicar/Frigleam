@@ -1,12 +1,19 @@
 import gleam/dynamic
 import gleam/option.{type Option}
 import items.{type Item}
+import saved_lists.{type SavedList}
 import varasto
 
 pub type Model {
   Model(
     items_storage: varasto.TypedStorage(List(Item)),
     items: List(Item),
+    saved_lists_storage: varasto.TypedStorage(List(SavedList)),
+    saved_lists: List(SavedList),
+    recent_lists_storage: varasto.TypedStorage(List(String)),
+    recent_lists: List(String),
+    editing_saved_list: Option(String),
+    draft_saved_name: String,
     scanning: Bool,
     editing: Option(String),
     confirm_delete_list: Bool,
@@ -25,6 +32,7 @@ pub type Model {
     show_cart_menu: Bool,
   )
 }
+
 
 pub type ConnectionStatus {
   Connecting
@@ -62,4 +70,13 @@ pub type Message {
   UserConfirmedSwitchRoom
   UserGenerateRandomRoom
   UserToggledCartMenu
+  UserSavedCurrentList
+  UserSavedList(room_id: String)
+  UserRemovedSavedList(room_id: String)
+  UserStartedRenamingSavedList(room_id: String, current_name: String)
+  UserChangedDraftSavedName(String)
+  UserConfirmedRenameSavedList(room_id: String)
+  UserCancelledRenameSavedList
+  UserSelectedRoom(room_id: String)
 }
+

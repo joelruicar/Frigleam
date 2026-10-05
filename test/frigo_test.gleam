@@ -1,7 +1,10 @@
 import categories
+import gleam/json
+import gleam/option
 import gleeunit
 import gleeunit/should
 import items.{Item, merge_item, parse_scanned_line, sort_items}
+import saved_lists.{SavedList}
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -75,3 +78,50 @@ pub fn merge_item_accumulates_amount_test() {
   updated
   |> should.equal([Item("1", "Manzanas", 5, False, "🥬 Frutas y verduras")])
 }
+
+pub fn add_recent_limits_to_five_and_moves_to_front_test() {
+  let recents = ["a", "b", "c", "d", "e"]
+  // Adding existing item "c" moves it to front
+  let updated = saved_lists.add_recent(recents, "c")
+  updated |> should.equal(["c", "a", "b", "d", "e"])
+
+  // Adding new item pushes out the 5th item
+  let updated2 = saved_lists.add_recent(updated, "f")
+  updated2 |> should.equal(["f", "c", "a", "b", "d"])
+}
+
+pub fn saved_lists_operations_test() {
+  let list1 = saved_lists.save_list([], "casa", "Mi Casa")
+  saved_lists.is_saved(list1, "casa") |> should.equal(True)
+  saved_lists.find_saved_name(list1, "casa")
+  |> should.equal(option.Some("Mi Casa"))
+
+  // Rename list
+  let renamed = saved_lists.rename_saved_list(list1, "casa", "Casa de Verano")
+  saved_lists.find_saved_name(renamed, "casa")
+  |> should.equal(option.Some("Casa de Verano"))
+
+  // Remove list
+  let empty = saved_lists.remove_saved_list(renamed, "casa")
+  saved_lists.is_saved(empty, "casa") |> should.equal(False)
+}
+
+pub fn saved_lists_serialization_test() {
+  let sample = [
+    SavedList("casa", "Mi Casa"),
+    SavedList("trabajo", "Oficina"),
+  ]
+  let encoded = json.to_string(saved_lists.saved_lists_writer(sample))
+  let decoded = json.parse(encoded, saved_lists.saved_lists_reader())
+  decoded |> should.equal(Ok(sample))
+}
+
+pub fn recents_serialization_test() {
+  let sample = ["casa", "finde", "frigo-1234"]
+  let encoded = json.to_string(saved_lists.recents_writer(sample))
+  let decoded = json.parse(encoded, saved_lists.recents_reader())
+  decoded |> should.equal(Ok(sample))
+}
+
+
+
