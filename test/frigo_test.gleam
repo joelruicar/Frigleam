@@ -122,6 +122,3 @@ pub fn recents_serialization_test() {
   let decoded = json.parse(encoded, saved_lists.recents_reader())
   decoded |> should.equal(Ok(sample))
 }
-
-
-

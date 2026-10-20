@@ -395,6 +395,9 @@ body {
   margin-top: 24px;
   z-index: 5;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
   scrollbar-width: none;
 }
 
@@ -410,6 +413,7 @@ body {
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
+  flex: 0 0 auto;
   position: relative;
   bottom: -1px;
   transform: translateY(5px);
@@ -722,38 +726,6 @@ body {
   color: var(--text-muted);
   font-size: 15px;
   font-weight: 500;
-}
-
-/* Swipe to delete */
-.grocery-item.swiping,
-.grocery-item.swipe-confirmed {
-  background: var(--danger);
-  border-color: var(--danger);
-  transform: translateX(var(--swipe-distance, 0px));
-  transition: none;
-}
-
-.grocery-item.swiping::before,
-.grocery-item.swipe-confirmed::before {
-  content: "Eliminar";
-  position: absolute;
-  right: 16px;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  pointer-events: none;
-}
-
-.grocery-item.swipe-confirmed {
-  opacity: 0;
-  transition: opacity 0.18s ease, transform 0.18s ease;
-}
-
-.grocery-item.swipe-cancelled {
-  transform: translateX(0);
-  transition: transform 0.2s ease;
 }
 
 /* Inline Edit */
