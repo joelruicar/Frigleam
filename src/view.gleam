@@ -100,7 +100,6 @@ fn view_item(model: Model, item: Item) -> Element(Message) {
             #("grocery-item", True),
             #("item-checked", item.checked),
           ]),
-          attribute.attribute("data-swipe-item", item.id),
         ],
         [
           checkbox,

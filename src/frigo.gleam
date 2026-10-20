@@ -101,9 +101,6 @@ fn get_share_link(room_id: String) -> String
 @external(javascript, "./frigo_ffi.mjs", "render_qr_code")
 fn render_qr_code(element_id: String, text: String) -> Nil
 
-@external(javascript, "./frigo_ffi.mjs", "enable_swipe_to_delete")
-fn enable_swipe_to_delete(on_swipe: fn(String) -> Nil) -> Nil
-
 // =============================================================================
 // Application helpers
 // =============================================================================
@@ -738,9 +735,6 @@ fn init(_initial: Int) -> #(Model, effect.Effect(Message)) {
         let _ =
           varasto.set(recent_storage, "frigo_recent_lists", initial_recents)
         Nil
-      }),
-      effect.from(fn(dispatch) {
-        enable_swipe_to_delete(fn(id) { dispatch(UserDeletedItem(id)) })
       }),
       start_sync_effect(room),
     ]),
